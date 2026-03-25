@@ -24,6 +24,7 @@ npm-debug.log*
 # misc
 .DS_Store
 coverage
+*.tsbuildinfo
 
 # prisma
 prisma/dev.db
