@@ -2,7 +2,8 @@ import type { ListenAdapterInput } from "@/types/live-agent";
 
 export const listenFixtures = {
   emergencyVehicle: {
-    transcript: "I can hear a siren and a fire truck is approaching from behind.",
+    transcript:
+      "I can hear a siren and a fire truck is approaching from behind.",
     source: "microphone",
     confidenceHint: 0.96,
   } satisfies ListenAdapterInput,

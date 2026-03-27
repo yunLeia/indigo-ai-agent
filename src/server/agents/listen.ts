@@ -1,4 +1,8 @@
-import type { AudioObservation, ListenAdapterInput, SignalLabel } from "@/types/live-agent";
+import type {
+  AudioObservation,
+  ListenAdapterInput,
+  SignalLabel,
+} from "@/types/live-agent";
 
 const KEYWORD_RULES: Array<{ signal: SignalLabel; keywords: string[] }> = [
   {

@@ -107,12 +107,7 @@ export type ArchitectDecision = {
 };
 
 export type ExecutorAction = {
-  id:
-    | "open-map"
-    | "acknowledge"
-    | "call-help"
-    | "dismiss"
-    | "view-summary";
+  id: "open-map" | "acknowledge" | "call-help" | "dismiss" | "view-summary";
   label: string;
 };
 
