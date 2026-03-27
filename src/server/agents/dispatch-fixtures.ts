@@ -15,3 +15,11 @@ export const hospitalPaFixture: AudioObservation = {
   timestampIso: new Date().toISOString(),
   source: "simulation",
 };
+
+export const ambientNoiseFixture: AudioObservation = {
+  transcript: "Soft fan hum and keyboard typing in an office.",
+  detectedSignal: "ambient_noise",
+  confidence: 0.88,
+  timestampIso: new Date().toISOString(),
+  source: "simulation",
+};
