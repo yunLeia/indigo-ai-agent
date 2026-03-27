@@ -20,9 +20,11 @@ export const infoDispatchFixture: DispatchDecision = {
 export const emergencyContextFixture: ContextSnapshot = {
   locationLabel: "main intersection",
   environmentLabel: "street",
+  userSituation: "on_foot",
 };
 
 export const infoContextFixture: ContextSnapshot = {
   locationLabel: "outpatient desk",
   environmentLabel: "hospital lobby",
+  userSituation: "waiting_room",
 };

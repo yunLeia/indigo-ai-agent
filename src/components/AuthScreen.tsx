@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import supabaseClient from "@/lib/supabaseClient";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 import type { User } from "@supabase/supabase-js";
 
 type AuthScreenProps = {
@@ -21,39 +21,50 @@ export default function AuthScreen({ onSuccess }: AuthScreenProps) {
     setError("");
     setLoading(true);
 
+    const client = getSupabaseClient();
+
     try {
       if (isRegister) {
-        const { data, error: signUpError } = await supabaseClient.auth.signUp({
+        console.log("[myIndigo:auth] Registering:", email);
+        const { data, error: signUpError } = await client.auth.signUp({
           email,
           password,
         });
         if (signUpError) throw signUpError;
         if (!data.user) throw new Error("Registration failed");
+        console.log("[myIndigo:auth] User created:", data.user.id);
 
-        const { error: profileError } = await supabaseClient
+        console.log("[myIndigo:auth] Inserting profile...");
+        const { error: profileError } = await client
           .from("profiles")
           .insert({ id: data.user.id, registered_name: registeredName });
         if (profileError) throw profileError;
+        console.log("[myIndigo:auth] Profile saved");
 
         onSuccess(data.user, registeredName);
       } else {
+        console.log("[myIndigo:auth] Logging in:", email);
         const { data, error: signInError } =
-          await supabaseClient.auth.signInWithPassword({ email, password });
+          await client.auth.signInWithPassword({ email, password });
         if (signInError) throw signInError;
         if (!data.user) throw new Error("Login failed");
+        console.log("[myIndigo:auth] Logged in:", data.user.id);
 
-        const { data: profile, error: profileError } = await supabaseClient
+        console.log("[myIndigo:auth] Fetching profile...");
+        const { data: profile, error: profileError } = await client
           .from("profiles")
           .select("registered_name")
           .eq("id", data.user.id)
           .single();
         if (profileError) throw profileError;
+        console.log("[myIndigo:auth] Profile loaded:", profile.registered_name);
 
         onSuccess(data.user, profile.registered_name as string);
       }
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Something went wrong";
+      console.error("[myIndigo:auth] Error:", message);
       setError(message);
     } finally {
       setLoading(false);
