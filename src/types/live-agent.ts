@@ -42,6 +42,14 @@ export type AudioObservation = {
   source: "microphone" | "stream" | "simulation";
 };
 
+export type ListenAdapterInput = {
+  transcript: string;
+  source: AudioObservation["source"];
+  hintSignal?: SignalLabel;
+  confidenceHint?: number;
+  capturedAtIso?: string;
+};
+
 export type DispatchDecision = {
   category: SignalCategory;
   signal: SignalLabel;
@@ -98,13 +106,32 @@ export type ArchitectDecision = {
   escalation: "notify-now" | "surface-now" | "log-only";
 };
 
+export type ExecutorAction = {
+  id: "open-map" | "acknowledge" | "call-help" | "dismiss" | "view-summary";
+  label: string;
+};
+
+export type AlertChannel = "phone-and-wearable" | "phone-only" | "log-only";
+
+export type ExecutorDecision = {
+  channel: AlertChannel;
+  phoneTitle: string;
+  phoneBody: string;
+  wearableTitle: string;
+  wearableBody: string;
+  vibration: "strong" | "standard" | "none";
+  actions: ExecutorAction[];
+};
+
 export type AgentPipelineResult = {
   rawContext: RawContextInput;
   context: ContextSnapshot;
+  listenInput?: ListenAdapterInput;
   observation: AudioObservation;
   dispatch: DispatchDecision;
   architect: ArchitectDecision;
-  trace: Array<"context" | "listen" | "dispatch" | "architect">;
+  executor: ExecutorDecision;
+  trace: Array<"context" | "listen" | "dispatch" | "architect" | "executor">;
 };
 
 export type LiveAgentBlueprint = {

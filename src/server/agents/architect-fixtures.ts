@@ -17,9 +17,18 @@ export const infoDispatchFixture: DispatchDecision = {
     "Signal classified as info from public announcement voice pattern.",
 };
 
+export const awarenessDispatchFixture: DispatchDecision = {
+  category: "routine",
+  signal: "doorbell",
+  confidence: 0.89,
+  routeTo: "architect",
+  reasoning: "Signal classified as routine home awareness event.",
+};
+
 export const emergencyContextFixture: ContextSnapshot = {
   locationLabel: "main intersection",
   environmentLabel: "street",
+  userSituation: "on_foot",
   userSituation: "on_foot",
 };
 
