@@ -27,3 +27,26 @@ export type DispatchDecision = {
   routeTo: "architect";
   reasoning: string;
 };
+
+export type ArchitectSeverity = "low" | "medium" | "high" | "critical";
+
+export type WearableSignal =
+  | "strong-vibration"
+  | "standard-vibration"
+  | "visual-only";
+
+export type EscalationMode = "notify-now" | "surface-now" | "log-only";
+
+export type ContextSnapshot = {
+  locationLabel?: string;
+  environmentLabel?: string;
+};
+
+export type ArchitectDecision = {
+  severity: ArchitectSeverity;
+  title: string;
+  userMessage: string;
+  recommendedActions: string[];
+  wearableSignal: WearableSignal;
+  escalation: EscalationMode;
+};
