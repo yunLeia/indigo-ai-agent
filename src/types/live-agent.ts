@@ -139,6 +139,25 @@ export type AgentPipelineResult = {
   trace: Array<"context" | "listen" | "dispatch" | "architect" | "executor">;
 };
 
+export type LiveResponseModality = "TEXT";
+
+export type LiveSessionConfig = {
+  provider: "gemini-live";
+  configured: boolean;
+  model: string;
+  responseModalities: LiveResponseModality[];
+  inputAudioTranscription: boolean;
+  systemInstruction: string;
+  supportedScenarios: RawContextInput["scenarioHint"][];
+  transport: "websocket";
+  pipelineStages: AgentPipelineResult["trace"];
+};
+
+export type LiveIngestRequest = {
+  listenInput: ListenAdapterInput;
+  rawContext: RawContextInput;
+};
+
 export type LiveAgentBlueprint = {
   category: "live-agent";
   primaryGoal: string;
