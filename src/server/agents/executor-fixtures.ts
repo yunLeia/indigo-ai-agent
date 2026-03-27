@@ -17,7 +17,10 @@ export const executorFixtures = {
     context: emergencyContextFixture,
   },
   info: {
-    architect: architectDispatchDecision(infoDispatchFixture, infoContextFixture),
+    architect: architectDispatchDecision(
+      infoDispatchFixture,
+      infoContextFixture,
+    ),
     context: infoContextFixture,
   },
   awareness: {

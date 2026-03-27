@@ -31,12 +31,17 @@ function buildActions(decision: ArchitectDecision): ExecutorAction[] {
   return [{ id: "dismiss", label: "Dismiss" }];
 }
 
-function resolveChannel(decision: ArchitectDecision): ExecutorDecision["channel"] {
+function resolveChannel(
+  decision: ArchitectDecision,
+): ExecutorDecision["channel"] {
   if (decision.escalation === "log-only") {
     return "log-only";
   }
 
-  if (decision.severity === "low" && decision.wearableSignal === "visual-only") {
+  if (
+    decision.severity === "low" &&
+    decision.wearableSignal === "visual-only"
+  ) {
     return "phone-only";
   }
 
@@ -62,7 +67,9 @@ function buildWearableBody(
   context: ContextSnapshot,
 ) {
   const firstAction = decision.recommendedActions[0];
-  const locationSuffix = context.locationLabel ? ` · ${context.locationLabel}` : "";
+  const locationSuffix = context.locationLabel
+    ? ` · ${context.locationLabel}`
+    : "";
 
   if (!firstAction) {
     return `${decision.userMessage}${locationSuffix}`.trim();

@@ -38,7 +38,7 @@ export const infoContextFixture: ContextSnapshot = {
 };
 
 export const awarenessContextFixture: ContextSnapshot = {
-  locationLabel: "home entryway",
-  environmentLabel: "apartment",
+  locationLabel: "living room",
+  environmentLabel: "home",
   userSituation: "indoors",
 };
