@@ -4,226 +4,188 @@ import type { AlertEvent } from "./DemoScreen";
 
 type PhoneMockupProps = {
   alert: AlertEvent | null;
-  scenario: "siren" | "name";
+  scenario: "siren" | "hospital";
   radarActive: boolean;
+  locationText: string;
 };
 
 export default function PhoneMockup({
   alert,
   scenario,
   radarActive,
+  locationText,
 }: PhoneMockupProps) {
   const isSiren = alert?.scenario === "siren";
-  const isName = alert?.scenario === "name";
 
   return (
     <div style={styles.frame}>
       <div style={styles.notch} />
       <div style={styles.screen}>
-        <div style={styles.locationPill}>Chelsea, NY 10011</div>
-
-        <div style={styles.radarContainer}>
-          <div
-            style={{
-              ...styles.radarRing,
-              width: 140,
-              height: 140,
-              opacity: 0.15,
-            }}
-          />
-          <div
-            style={{
-              ...styles.radarRing,
-              width: 100,
-              height: 100,
-              opacity: 0.25,
-            }}
-          />
-          <div
-            style={{
-              ...styles.radarRing,
-              width: 60,
-              height: 60,
-              opacity: 0.35,
-            }}
-          />
-          <div style={styles.centerDot} />
-
-          {radarActive && scenario === "siren" && (
-            <div style={styles.sirenDot}>
-              <style>{`
-                @keyframes sirenPulse {
-                  0%, 100% { transform: scale(1); opacity: 1; }
-                  50% { transform: scale(1.6); opacity: 0.5; }
-                }
-              `}</style>
-            </div>
-          )}
+        <div style={styles.mapBg}>
+          <div style={styles.locationWrap}>
+            <span style={styles.locationText}>{locationText}</span>
+          </div>
+          <div style={styles.radar}>
+            <div style={styles.radarMid} />
+            <div style={styles.radarInner} />
+            <div style={styles.radarDot} />
+            {radarActive && scenario === "siren" && (
+              <div style={styles.sirenDot} />
+            )}
+          </div>
         </div>
-
         {alert && (
           <div
             style={{
-              ...styles.alertPanel,
-              background: isSiren ? "#1a0808" : "#110f1f",
-              borderColor: isSiren ? "#E24B4A" : "#7F77DD",
+              ...styles.phoneAlert,
+              background: isSiren
+                ? "rgba(226,75,74,0.12)"
+                : "rgba(127,119,221,0.12)",
+              borderTop: isSiren
+                ? "0.5px solid rgba(226,75,74,0.3)"
+                : "0.5px solid rgba(127,119,221,0.3)",
             }}
           >
-            <style>{`
-              @keyframes slideUp {
-                from { transform: translateY(100%); opacity: 0; }
-                to { transform: translateY(0); opacity: 1; }
-              }
-            `}</style>
             <div
               style={{
-                ...styles.alertIcon,
-                background: isSiren ? "#E24B4A" : "#7F77DD",
+                ...styles.phoneAlertTitle,
+                color: isSiren ? "#ff6b6b" : "#CECBF6",
               }}
             >
-              {isSiren ? "!" : "+"}
+              {alert.title}
             </div>
-            <div>
-              <div style={styles.alertTitle}>{alert.title}</div>
-              <div style={styles.alertSubtitle}>{alert.subtitle}</div>
-            </div>
-            {alert.risk && (
-              <div
-                style={{
-                  ...styles.riskBadge,
-                  background:
-                    alert.risk === "HIGH"
-                      ? "rgba(226,75,74,0.2)"
-                      : "rgba(127,119,221,0.2)",
-                  color: isName ? "#7F77DD" : "#E24B4A",
-                }}
-              >
-                {alert.risk}
-              </div>
-            )}
+            <div style={styles.phoneAlertSub}>{alert.subtitle}</div>
           </div>
         )}
+        <div style={styles.phoneBottom}>
+          <div style={styles.phoneBtn}>Agent</div>
+          <div style={styles.phoneBtn}>Settings</div>
+        </div>
       </div>
+      <style>{`
+        @keyframes sirenPulse {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.5; transform: scale(1.3); }
+        }
+      `}</style>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   frame: {
-    width: 220,
-    height: 440,
-    borderRadius: 44,
-    border: "2px solid #2a2a2a",
-    background: "#000",
-    padding: 8,
-    position: "relative",
+    background: "#111",
+    border: "3px solid #2a2a2a",
+    borderRadius: 48,
+    padding: 14,
+    width: 300,
     flexShrink: 0,
   },
   notch: {
     width: 80,
-    height: 24,
-    background: "#000",
-    borderRadius: "0 0 16px 16px",
-    position: "absolute",
-    top: 8,
-    left: "50%",
-    transform: "translateX(-50%)",
-    zIndex: 2,
+    height: 8,
+    background: "#1a1a1a",
+    borderRadius: 4,
+    margin: "0 auto 10px",
   },
   screen: {
-    width: "100%",
-    height: "100%",
-    borderRadius: 36,
     background: "#1a1a2e",
+    borderRadius: 34,
+    overflow: "hidden",
+    height: 520,
+    position: "relative",
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    position: "relative",
-    overflow: "hidden",
   },
-  locationPill: {
-    marginTop: 36,
-    padding: "4px 12px",
-    borderRadius: 999,
-    background: "rgba(255,255,255,0.08)",
-    color: "#aaa",
-    fontSize: 10,
-    fontWeight: 500,
-  },
-  radarContainer: {
+  mapBg: {
     flex: 1,
+    background: "linear-gradient(180deg, #1a1f3a 0%, #111827 100%)",
+    position: "relative",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+  },
+  locationWrap: {
+    position: "absolute",
+    top: 14,
+    left: 0,
+    right: 0,
+    textAlign: "center",
+  },
+  locationText: {
+    fontSize: 12,
+    color: "#6366f1",
+    background: "rgba(99,102,241,0.1)",
+    borderRadius: 12,
+    padding: "3px 12px",
+    display: "inline-block",
+  },
+  radar: {
+    width: 150,
+    height: 150,
+    borderRadius: "50%",
+    border: "1px solid rgba(99,102,241,0.2)",
     position: "relative",
-    width: "100%",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  radarRing: {
+  radarMid: {
     position: "absolute",
+    inset: 24,
     borderRadius: "50%",
-    border: "1px solid #7F77DD",
+    border: "1px solid rgba(99,102,241,0.15)",
   },
-  centerDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: "#fff",
+  radarInner: {
     position: "absolute",
-    zIndex: 1,
+    inset: 48,
+    borderRadius: "50%",
+    border: "1px solid rgba(99,102,241,0.1)",
   },
-  sirenDot: {
+  radarDot: {
     width: 10,
     height: 10,
     borderRadius: "50%",
-    background: "#E24B4A",
-    position: "absolute",
-    top: "25%",
-    right: "25%",
-    zIndex: 1,
-    animation: "sirenPulse 1s ease-in-out infinite",
+    background: "#6366f1",
   },
-  alertPanel: {
+  sirenDot: {
     position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: "12px 14px",
-    borderTop: "1px solid",
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    animation: "slideUp 0.3s ease-out",
-  },
-  alertIcon: {
-    width: 28,
-    height: 28,
+    width: 14,
+    height: 14,
     borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#fff",
+    background: "#E24B4A",
+    top: 14,
+    right: 24,
+    animation: "sirenPulse 1s infinite",
+  },
+  phoneAlert: {
+    padding: "14px 16px",
+  },
+  phoneAlertTitle: {
     fontSize: 14,
-    fontWeight: 700,
-    flexShrink: 0,
+    fontWeight: 600,
   },
-  alertTitle: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: 700,
-    lineHeight: 1.3,
+  phoneAlertSub: {
+    fontSize: 11,
+    color: "#888",
+    marginTop: 3,
   },
-  alertSubtitle: {
-    color: "#ccc",
-    fontSize: 10,
-    lineHeight: 1.3,
-    marginTop: 2,
+  phoneBottom: {
+    background: "#111",
+    borderRadius: "0 0 34px 34px",
+    padding: 12,
+    display: "flex",
+    justifyContent: "center",
+    gap: 20,
   },
-  riskBadge: {
-    marginLeft: "auto",
-    padding: "2px 8px",
-    borderRadius: 4,
-    fontSize: 9,
-    fontWeight: 700,
-    flexShrink: 0,
+  phoneBtn: {
+    background: "#1a1a1a",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#2a2a2a",
+    borderRadius: 10,
+    padding: "7px 16px",
+    fontSize: 11,
+    color: "#888",
   },
 };

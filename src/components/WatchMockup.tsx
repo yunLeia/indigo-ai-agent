@@ -11,120 +11,114 @@ export default function WatchMockup({ alert }: WatchMockupProps) {
 
   return (
     <div style={styles.frame}>
-      <div style={styles.crown} />
+      <div style={styles.watchTime}>9:41</div>
       <div
         style={{
           ...styles.screen,
           ...(alert
-            ? {
-                background: isSiren ? "#1a0808" : "#110f1f",
-                borderColor: isSiren ? "#E24B4A" : "#7F77DD",
-                animation: "watchPop 0.3s ease-out, watchShake 0.4s 0.3s ease",
-              }
+            ? isSiren
+              ? {
+                  background: "#1a0808",
+                  borderColor: "rgba(226,75,74,0.3)",
+                }
+              : {
+                  background: "#110f1f",
+                  borderColor: "rgba(127,119,221,0.3)",
+                }
             : {}),
         }}
       >
-        <style>{`
-          @keyframes watchPop {
-            0% { transform: scale(0.9); }
-            60% { transform: scale(1.05); }
-            100% { transform: scale(1); }
-          }
-          @keyframes watchShake {
-            0%, 100% { transform: translateX(0); }
-            20% { transform: translateX(-3px); }
-            40% { transform: translateX(3px); }
-            60% { transform: translateX(-2px); }
-            80% { transform: translateX(2px); }
-          }
-        `}</style>
         {alert ? (
-          <div style={styles.alertContent}>
+          <div style={styles.alertWrap}>
             <div
               style={{
-                ...styles.alertIcon,
+                ...styles.watchIcon,
                 background: isSiren ? "#E24B4A" : "#7F77DD",
               }}
             >
               {isSiren ? "!" : "+"}
             </div>
-            <div style={styles.alertTitle}>{alert.title}</div>
-            <div style={styles.alertSubtitle}>{alert.subtitle}</div>
+            <div style={styles.watchTitle}>{alert.title}</div>
+            <div style={styles.watchSub}>{alert.subtitle}</div>
           </div>
         ) : (
-          <div style={styles.idle}>9:41</div>
+          <div style={styles.watchEmpty}>Waiting...</div>
         )}
       </div>
+      <style>{`
+        @keyframes wPop {
+          from { transform: scale(0.5); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
 
 const styles: Record<string, React.CSSProperties> = {
   frame: {
-    width: 140,
-    height: 180,
-    borderRadius: 32,
-    border: "2px solid #2a2a2a",
-    background: "#000",
-    padding: 8,
-    position: "relative",
+    width: 210,
+    background: "#111",
+    border: "3px solid #2a2a2a",
+    borderRadius: 38,
+    padding: 12,
     flexShrink: 0,
   },
-  crown: {
-    position: "absolute",
-    right: -6,
-    top: "40%",
-    width: 4,
-    height: 20,
-    borderRadius: 2,
-    background: "#2a2a2a",
+  watchTime: {
+    fontSize: 14,
+    color: "#555",
+    textAlign: "center",
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   screen: {
-    width: "100%",
-    height: 160,
-    borderRadius: 24,
-    background: "#111",
-    border: "1px solid #222",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    transition: "background 0.3s, border-color 0.3s",
-  },
-  idle: {
-    color: "#555",
-    fontSize: 28,
-    fontWeight: 300,
-    fontVariantNumeric: "tabular-nums",
-  },
-  alertContent: {
+    background: "#0a0a0a",
+    borderRadius: 28,
+    height: 240,
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: 6,
-    padding: "12px 10px",
+    justifyContent: "center",
+    padding: 18,
     textAlign: "center",
+    transition: "all 0.5s",
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: "transparent",
   },
-  alertIcon: {
-    width: 24,
-    height: 24,
+  watchEmpty: {
+    fontSize: 13,
+    color: "#333",
+  },
+  alertWrap: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+    animation: "wPop 0.3s ease-out",
+  },
+  watchIcon: {
+    width: 44,
+    height: 44,
     borderRadius: "50%",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#fff",
-    fontSize: 12,
+    fontSize: 20,
     fontWeight: 700,
+    color: "#fff",
+    marginBottom: 12,
   },
-  alertTitle: {
+  watchTitle: {
+    fontSize: 14,
+    fontWeight: 600,
     color: "#fff",
-    fontSize: 11,
-    fontWeight: 700,
     lineHeight: 1.3,
+    marginBottom: 6,
   },
-  alertSubtitle: {
-    color: "#ccc",
-    fontSize: 9,
+  watchSub: {
+    fontSize: 11,
+    color: "#777",
     lineHeight: 1.3,
   },
 };

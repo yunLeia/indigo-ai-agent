@@ -1,519 +1,647 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import PhoneMockup from "./PhoneMockup";
 import AgentPanel from "./AgentPanel";
 import WatchMockup from "./WatchMockup";
+import { useAudioCapture } from "@/hooks/useAudioCapture";
+import {
+  useAgentWebSocket,
+  type ServerMessage,
+} from "@/hooks/useAgentWebSocket";
 import type { AgentStep } from "./AgentPanel";
 
 export type AlertEvent = {
-  scenario: "siren" | "name";
+  scenario: "siren" | "hospital";
   title: string;
   subtitle: string;
   risk: string;
 };
 
-type DemoEvent =
-  | { type: "soundDetected"; text: string; latency_ms: number }
-  | {
-      type: "agentStep";
-      agent: string;
-      status: "active" | "done";
-      output: string;
-    }
-  | {
-      type: "alert";
-      scenario: "siren" | "name";
-      title: string;
-      subtitle: string;
-      risk: string;
-    };
+/* ── Initial step definitions ───────────────────────────── */
 
-type ScheduledEvent = { delay: number; event: DemoEvent };
-
-const SIREN_SEQUENCE: ScheduledEvent[] = [
+const INITIAL_STEPS: AgentStep[] = [
   {
-    delay: 700,
-    event: {
-      type: "soundDetected",
-      text: "Siren detected",
-      latency_ms: 620,
-    },
+    id: "dispatch-listen",
+    label: "DispatchAgent listening",
+    sub: "Gemini Live — always on",
+    icon: "D",
+    status: "inactive",
+  },
+  {
+    id: "dispatch-classify",
+    label: "Sound classified",
+    sub: "",
+    icon: "D",
+    status: "inactive",
+  },
+  {
+    id: "specialist",
+    label: "Specialist agent called",
+    sub: "",
+    icon: "S",
+    status: "inactive",
+  },
+  {
+    id: "risk",
+    label: "Risk scored + alert generated",
+    sub: "",
+    icon: "S",
+    status: "inactive",
+  },
+  {
+    id: "alert",
+    label: "Alert dispatched to devices",
+    sub: "",
+    icon: "A",
+    status: "inactive",
+  },
+];
+
+/* ── Demo simulation data (used when backend not connected) */
+
+type SimStep = { delay: number; msg: ServerMessage };
+
+const SIREN_SIM: SimStep[] = [
+  {
+    delay: 600,
+    msg: { type: "sound_detected", text: "Siren detected", latency_ms: 620 },
   },
   {
     delay: 1400,
-    event: {
-      type: "agentStep",
+    msg: {
+      type: "agent_update",
       agent: "dispatch",
       status: "active",
-      output: "Emergency siren — routing to VehicleSoundAgent",
+      output: 'DispatchAgent: "this is a siren" — classifying vehicle type',
     },
   },
   {
-    delay: 2000,
-    event: {
-      type: "agentStep",
+    delay: 2300,
+    msg: {
+      type: "agent_update",
       agent: "dispatch",
       status: "done",
       output: "Siren confirmed — high confidence",
     },
   },
   {
-    delay: 2600,
-    event: {
-      type: "agentStep",
+    delay: 2400,
+    msg: {
+      type: "agent_update",
       agent: "vehicle",
       status: "active",
-      output: "Classifying: fire engine approaching from behind",
+      output: "VehicleSoundAgent: fire engine, approaching from rear",
     },
   },
   {
     delay: 3200,
-    event: {
-      type: "agentStep",
+    msg: {
+      type: "agent_update",
       agent: "vehicle",
       status: "done",
-      output: "Risk: HIGH — immediate action required",
+      output: "Risk: HIGH — W 23rd, on foot, intersection",
     },
   },
   {
-    delay: 3500,
-    event: {
+    delay: 4000,
+    msg: {
       type: "alert",
       scenario: "siren",
-      title: "Fire truck approaching",
-      subtitle: "Move to sidewalk now",
+      title: "Emergency vehicle approaching",
+      subtitle: "Check surroundings and yield — W 23rd St",
       risk: "HIGH",
     },
   },
 ];
 
-const NAME_SEQUENCE: ScheduledEvent[] = [
+const HOSPITAL_SIM: SimStep[] = [
   {
-    delay: 900,
-    event: {
-      type: "soundDetected",
-      text: "Announcement detected",
+    delay: 600,
+    msg: {
+      type: "sound_detected",
+      text: "PA speech detected",
       latency_ms: 810,
     },
   },
   {
-    delay: 1600,
-    event: {
-      type: "agentStep",
+    delay: 1400,
+    msg: {
+      type: "agent_update",
       agent: "dispatch",
       status: "active",
-      output: "Speech detected — scanning for registered name",
+      output:
+        'DispatchAgent: "announcement heard" — scanning for registered name',
     },
   },
   {
     delay: 2300,
-    event: {
-      type: "agentStep",
+    msg: {
+      type: "agent_update",
       agent: "dispatch",
       status: "done",
       output: "Name match found: Alex Kim",
     },
   },
   {
-    delay: 2900,
-    event: {
-      type: "agentStep",
+    delay: 2400,
+    msg: {
+      type: "agent_update",
       agent: "name",
       status: "active",
-      output: "Extracting location from announcement",
+      output: "NameDetectionAgent: extracting location from announcement",
     },
   },
   {
-    delay: 3500,
-    event: {
-      type: "agentStep",
+    delay: 3200,
+    msg: {
+      type: "agent_update",
       agent: "name",
       status: "done",
-      output: "Exam Room 3, 2nd floor confirmed",
+      output: "Exam Room 3, 2nd floor — wayfinding: north wing",
     },
   },
   {
-    delay: 3800,
-    event: {
+    delay: 4000,
+    msg: {
       type: "alert",
       scenario: "name",
       title: "Your name was called",
-      subtitle: "Go to Exam Room 3",
+      subtitle: "Exam Room 3 — 2nd floor north wing",
       risk: "MEDIUM",
     },
   },
 ];
 
-function getInitialSteps(scenario: "siren" | "name"): AgentStep[] {
-  return [
-    {
-      id: "dispatch-active",
-      label: "DispatchAgent",
-      icon: "D",
-      status: "inactive",
-      output: "",
-    },
-    {
-      id: "dispatch-done",
-      label: "DispatchAgent",
-      icon: "D",
-      status: "inactive",
-      output: "",
-    },
-    {
-      id: scenario === "siren" ? "vehicle" : "name",
-      label: scenario === "siren" ? "VehicleSoundAgent" : "NameDetectionAgent",
-      icon: scenario === "siren" ? "V" : "N",
-      status: "inactive",
-      output: "",
-    },
-    {
-      id: "alert",
-      label: "Alert dispatched",
-      icon: "A",
-      status: "inactive",
-      output: "",
-    },
-  ];
-}
+/* ── Map WebSocket agent_update to step index ───────────── */
 
-function mapAgentToStepIndex(agent: string, status: "active" | "done"): number {
-  if (agent === "dispatch" && status === "active") return 0;
+function agentToStepIndex(agent: string, status: "active" | "done"): number {
+  if (agent === "dispatch" && status === "active") return 1;
   if (agent === "dispatch" && status === "done") return 1;
-  if (agent === "vehicle" || agent === "name") return 2;
+  if ((agent === "vehicle" || agent === "name") && status === "active")
+    return 2;
+  if ((agent === "vehicle" || agent === "name") && status === "done") return 3;
   return -1;
 }
+
+/* ── Component ──────────────────────────────────────────── */
 
 type DemoScreenProps = {
   userName: string;
   onLogout: () => void;
 };
 
-export default function DemoScreen({ userName, onLogout }: DemoScreenProps) {
-  const [scenario, setScenario] = useState<"siren" | "name">("siren");
-  const [demoMode, setDemoMode] = useState(true);
-  const [playing, setPlaying] = useState(false);
+const WS_URL = "ws://localhost:8001/ws";
+
+export default function DemoScreen({
+  userName,
+  onLogout: _onLogout,
+}: DemoScreenProps) {
+  const [sc, setSc] = useState<"siren" | "hospital">("siren");
+  const [steps, setSteps] = useState<AgentStep[]>(
+    INITIAL_STEPS.map((s) => ({ ...s })),
+  );
+  const [elapsed, setElapsed] = useState(0);
   const [alert, setAlert] = useState<AlertEvent | null>(null);
   const [radarActive, setRadarActive] = useState(false);
-  const [steps, setSteps] = useState<AgentStep[]>(getInitialSteps("siren"));
-  const [elapsed, setElapsed] = useState(0);
-  const [soundText, setSoundText] = useState("");
+  const [locationText, setLocationText] = useState("Chelsea, NY 10011");
+  const [isLive, setIsLive] = useState(false);
+
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef(0);
+  const startRef = useRef(0);
 
-  function reset(s: "siren" | "name") {
+  /* ── Handle any message (from WS or demo sim) ────────── */
+
+  const handleMessage = useCallback((msg: ServerMessage) => {
+    if (msg.type === "sound_detected") {
+      // Step 0: DispatchAgent heard something
+      setRadarActive(true);
+      startRef.current = Date.now();
+      intervalRef.current = setInterval(() => {
+        setElapsed(Date.now() - startRef.current);
+      }, 100);
+
+      setSteps((prev) => {
+        const next = prev.map((s) => ({ ...s }));
+        next[0] = {
+          ...next[0],
+          status: "active",
+          label: `Sound detected — ${msg.text}`,
+          sub: `Gemini Live: latency ${msg.latency_ms}ms`,
+        };
+        return next;
+      });
+    } else if (msg.type === "agent_update") {
+      const idx = agentToStepIndex(msg.agent, msg.status);
+      if (idx < 0) return;
+
+      setSteps((prev) => {
+        const next = prev.map((s) => ({ ...s }));
+
+        // Mark step 0 done when dispatch starts
+        if (idx === 1 && next[0].status === "active") {
+          next[0] = { ...next[0], status: "done" };
+        }
+        // Mark dispatch done when specialist starts
+        if (idx === 2 && next[1].status !== "done") {
+          next[1] = { ...next[1], status: "done" };
+        }
+        // Mark specialist active→done when risk scored
+        if (idx === 3 && next[2].status === "active") {
+          next[2] = { ...next[2], status: "done" };
+        }
+
+        next[idx] = {
+          ...next[idx],
+          status: msg.status,
+          label: msg.output.split("—")[0].trim() || next[idx].label,
+          sub: msg.output,
+        };
+
+        return next;
+      });
+    } else if (msg.type === "alert") {
+      // Stop timer
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      setElapsed(Date.now() - startRef.current);
+
+      // Mark remaining steps done
+      setSteps((prev) => {
+        const next = prev.map((s) => ({ ...s }));
+        for (let i = 0; i < 4; i++) {
+          if (next[i].status !== "done") {
+            next[i] = { ...next[i], status: "done" };
+          }
+        }
+        next[4] = {
+          ...next[4],
+          status: "done",
+          label: "Alert dispatched to phone + watch",
+          sub: `${msg.title} — ${msg.risk}`,
+        };
+        return next;
+      });
+
+      const scenario = msg.scenario === "name" ? "hospital" : "siren";
+
+      setAlert({
+        scenario,
+        title: msg.title,
+        subtitle: msg.subtitle,
+        risk: msg.risk,
+      });
+    }
+  }, []);
+
+  /* ── WebSocket (real backend) ─────────────────────────── */
+
+  const { connected, connect, disconnect, sendAudioChunk } = useAgentWebSocket({
+    url: WS_URL,
+    userName,
+    userId: "demo-user",
+    onMessage: handleMessage,
+  });
+
+  /* ── Audio capture ────────────────────────────────────── */
+
+  const {
+    capturing,
+    start: startAudio,
+    stop: stopAudio,
+  } = useAudioCapture({
+    onChunk: sendAudioChunk,
+  });
+
+  /* ── Reset ────────────────────────────────────────────── */
+
+  const reset = useCallback(() => {
     timersRef.current.forEach(clearTimeout);
     timersRef.current = [];
     if (intervalRef.current) clearInterval(intervalRef.current);
-    setPlaying(false);
+    setElapsed(0);
     setAlert(null);
     setRadarActive(false);
-    setSoundText("");
-    setElapsed(0);
-    setSteps(getInitialSteps(s));
+    setSteps(INITIAL_STEPS.map((s) => ({ ...s })));
+  }, []);
+
+  /* ── Switch scenario ──────────────────────────────────── */
+
+  function switchScenario(s: "siren" | "hospital") {
+    setSc(s);
+    reset();
+    setLocationText(
+      s === "siren" ? "Chelsea, NY 10011" : "NYU Langone — Lobby",
+    );
   }
 
-  function switchScenario(s: "siren" | "name") {
-    setScenario(s);
-    reset(s);
-  }
+  /* ── Go live (connect WS + mic) ───────────────────────── */
 
-  function handleEvent(event: DemoEvent) {
-    if (event.type === "soundDetected") {
-      setSoundText(event.text);
-      setRadarActive(true);
-    } else if (event.type === "agentStep") {
-      const idx = mapAgentToStepIndex(event.agent, event.status);
-      if (idx >= 0) {
-        setSteps((prev) => {
-          const next = [...prev];
-          next[idx] = {
-            ...next[idx],
-            status: event.status,
-            output: event.output,
-          };
-          return next;
-        });
-      }
-    } else if (event.type === "alert") {
-      setAlert({
-        scenario: event.scenario,
-        title: event.title,
-        subtitle: event.subtitle,
-        risk: event.risk,
-      });
+  function toggleLive() {
+    if (isLive) {
+      stopAudio();
+      disconnect();
+      setIsLive(false);
+    } else {
+      reset();
+      connect();
+      startAudio();
+      setIsLive(true);
+      // Set step 0 to active — listening
       setSteps((prev) => {
-        const next = [...prev];
-        next[3] = {
-          ...next[3],
-          status: "done",
-          output: `${event.title} — ${event.risk}`,
-        };
+        const next = prev.map((s) => ({ ...s }));
+        next[0] = { ...next[0], status: "active" };
         return next;
       });
     }
   }
 
+  /* ── Play demo (simulated messages) ───────────────────── */
+
   function playDemo() {
-    reset(scenario);
-    setPlaying(true);
-    startTimeRef.current = Date.now();
-
-    intervalRef.current = setInterval(() => {
-      setElapsed(Date.now() - startTimeRef.current);
-    }, 100);
-
-    const sequence = scenario === "siren" ? SIREN_SEQUENCE : NAME_SEQUENCE;
-
-    const newTimers = sequence.map(({ delay, event }) =>
-      setTimeout(() => handleEvent(event), delay),
+    reset();
+    setLocationText(
+      sc === "siren" ? "Chelsea, NY 10011" : "NYU Langone — Lobby",
     );
 
-    const lastDelay = sequence[sequence.length - 1].delay;
-    newTimers.push(
-      setTimeout(() => {
-        if (intervalRef.current) clearInterval(intervalRef.current);
-        setElapsed(lastDelay);
-      }, lastDelay + 100),
-    );
+    if (sc === "siren") setRadarActive(true);
 
+    const sim = sc === "siren" ? SIREN_SIM : HOSPITAL_SIM;
+    const newTimers = sim.map(({ delay, msg }) =>
+      setTimeout(() => handleMessage(msg), delay),
+    );
     timersRef.current = newTimers;
   }
 
+  /* ── Watch alert mapping ──────────────────────────────── */
+
+  const watchAlert: AlertEvent | null = alert
+    ? sc === "siren"
+      ? {
+          scenario: "siren",
+          title: "Fire truck behind you",
+          subtitle: "Move right · Engine 14",
+          risk: alert.risk,
+        }
+      : {
+          scenario: "hospital",
+          title: "Your name was called",
+          subtitle: "Exam Room 3 · 2nd floor",
+          risk: alert.risk,
+        }
+    : null;
+
+  /* ── Render ───────────────────────────────────────────── */
+
   return (
-    <div style={styles.root}>
-      <header style={styles.topBar}>
-        <div style={styles.logo}>myIndigo</div>
-        <div style={styles.scenarioToggle}>
+    <div style={styles.stage}>
+      {/* Top bar */}
+      <div style={styles.topBar}>
+        <div style={styles.logo}>
+          my<b>Indigo</b>
+        </div>
+        <div style={styles.scRow}>
           <button
+            style={{
+              ...styles.scBtn,
+              ...(sc === "siren" ? styles.scBtnOn : {}),
+            }}
             onClick={() => switchScenario("siren")}
-            style={{
-              ...styles.scenarioBtn,
-              background:
-                scenario === "siren" ? "rgba(226,75,74,0.15)" : "transparent",
-              color: scenario === "siren" ? "#E24B4A" : "#666",
-              borderColor: scenario === "siren" ? "#E24B4A" : "#333",
-            }}
           >
-            🚨 Siren
+            Emergency vehicle
           </button>
           <button
-            onClick={() => switchScenario("name")}
             style={{
-              ...styles.scenarioBtn,
-              background:
-                scenario === "name" ? "rgba(127,119,221,0.15)" : "transparent",
-              color: scenario === "name" ? "#7F77DD" : "#666",
-              borderColor: scenario === "name" ? "#7F77DD" : "#333",
+              ...styles.scBtn,
+              ...(sc === "hospital" ? styles.scBtnOn : {}),
             }}
+            onClick={() => switchScenario("hospital")}
           >
-            📢 Name
+            Hospital PA
           </button>
         </div>
-        <div style={styles.statusPill}>
-          <span style={styles.statusDot} />
-          Always listening
-        </div>
-        <div style={styles.userInfo}>
-          <span style={styles.userName}>{userName}</span>
-          <button onClick={onLogout} style={styles.logoutBtn}>
-            Log out
-          </button>
-        </div>
-      </header>
-
-      <main style={styles.columns}>
-        <PhoneMockup
-          alert={alert}
-          scenario={scenario}
-          radarActive={radarActive}
-        />
-        <AgentPanel steps={steps} elapsed={elapsed} />
-        <WatchMockup alert={alert} />
-      </main>
-
-      {soundText && <div style={styles.soundBanner}>🎤 {soundText}</div>}
-
-      <footer style={styles.footer}>
-        <label style={styles.demoToggle}>
-          <span style={{ color: "#888", fontSize: 13 }}>Demo mode</span>
-          <button
-            onClick={() => setDemoMode(!demoMode)}
+        <div
+          style={{
+            ...styles.livePill,
+            ...(connected
+              ? {}
+              : {
+                  background: "#1a1008",
+                  borderColor: "#886622",
+                  color: "#cc9944",
+                }),
+          }}
+        >
+          <span
             style={{
-              ...styles.toggleTrack,
-              background: demoMode ? "#7F77DD" : "#333",
+              ...styles.liveDot,
+              background: connected ? "#1D9E75" : "#886622",
             }}
-          >
-            <span
-              style={{
-                ...styles.toggleThumb,
-                transform: demoMode ? "translateX(18px)" : "translateX(2px)",
-              }}
+          />
+          {connected
+            ? capturing
+              ? "Listening..."
+              : "Connected"
+            : "Offline — demo mode"}
+        </div>
+      </div>
+
+      {/* Main layout: devices left, agent panel right */}
+      <div style={styles.mainCols}>
+        <div style={styles.devicesCol}>
+          <div style={styles.deviceWrap}>
+            <PhoneMockup
+              alert={alert}
+              scenario={sc}
+              radarActive={radarActive}
+              locationText={locationText}
             />
-          </button>
-        </label>
+            <div style={styles.labelTag}>iPhone</div>
+          </div>
+          <div style={styles.deviceWrap}>
+            <WatchMockup alert={watchAlert} />
+            <div style={styles.labelTag}>Apple Watch</div>
+          </div>
+        </div>
+        <div style={styles.panelWrap}>
+          <AgentPanel steps={steps} elapsed={elapsed} />
+          <div style={styles.labelTag}>Agent reasoning — ADK pipeline</div>
+        </div>
+      </div>
 
-        {demoMode ? (
-          <button
-            onClick={playDemo}
-            disabled={playing}
-            style={{
-              ...styles.playBtn,
-              opacity: playing ? 0.5 : 1,
-            }}
-          >
-            {playing ? "Playing..." : "Play demo"}
-          </button>
-        ) : (
-          <div style={styles.micStatus}>🎙 Mic active (placeholder)</div>
-        )}
+      {/* Controls */}
+      <div style={styles.btnRow}>
+        <button
+          style={{
+            ...styles.liveBtn,
+            ...(isLive
+              ? {
+                  background: "#1a0808",
+                  borderColor: "#E24B4A",
+                  color: "#ff6b6b",
+                }
+              : {}),
+          }}
+          onClick={toggleLive}
+        >
+          {isLive ? "⏹ Stop listening" : "🎙 Go live"}
+        </button>
+        <button style={styles.playBtn} onClick={playDemo}>
+          ▶ Play demo
+        </button>
+        <button style={styles.resetBtn} onClick={reset}>
+          Reset
+        </button>
+      </div>
 
-        <div style={styles.elapsedTimer}>{(elapsed / 1000).toFixed(1)}s</div>
-      </footer>
+      <style>{`
+        @keyframes blink {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.25; }
+        }
+      `}</style>
     </div>
   );
 }
 
+/* ── Styles ──────────────────────────────────────────────── */
+
 const styles: Record<string, React.CSSProperties> = {
-  root: {
-    minHeight: "100vh",
+  stage: {
     background: "#0a0a0a",
-    color: "#fff",
+    minHeight: "100vh",
+    padding: "28px 48px",
     display: "flex",
     flexDirection: "column",
-    fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+    gap: 24,
+    fontFamily: "var(--font-sans), system-ui, -apple-system, sans-serif",
+    boxSizing: "border-box",
   },
   topBar: {
     display: "flex",
     alignItems: "center",
-    gap: 16,
-    padding: "12px 24px",
-    borderBottom: "1px solid #222",
+    justifyContent: "space-between",
   },
   logo: {
-    fontSize: 18,
-    fontWeight: 700,
-    color: "#7F77DD",
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: 500,
+    letterSpacing: -0.3,
   },
-  scenarioToggle: {
+  scRow: {
     display: "flex",
-    gap: 8,
-    marginLeft: 24,
+    gap: 6,
   },
-  scenarioBtn: {
-    padding: "6px 14px",
-    borderRadius: 8,
-    border: "1px solid",
+  scBtn: {
+    background: "transparent",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#2a2a2a",
+    color: "#555",
+    borderRadius: 20,
+    padding: "6px 18px",
     fontSize: 13,
-    fontWeight: 600,
     cursor: "pointer",
+    fontFamily: "inherit",
     transition: "all 0.2s",
   },
-  statusPill: {
-    marginLeft: "auto",
+  scBtnOn: {
+    borderColor: "#7F77DD",
+    color: "#CECBF6",
+    background: "#16142a",
+  },
+  livePill: {
     display: "flex",
     alignItems: "center",
     gap: 6,
-    padding: "4px 12px",
-    borderRadius: 999,
-    background: "rgba(29,158,117,0.12)",
-    color: "#1D9E75",
-    fontSize: 12,
-    fontWeight: 500,
+    background: "#0f2218",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#1D9E75",
+    borderRadius: 20,
+    padding: "6px 16px",
+    fontSize: 13,
+    color: "#9FE1CB",
+    transition: "all 0.3s",
   },
-  statusDot: {
+  liveDot: {
     width: 6,
     height: 6,
     borderRadius: "50%",
     background: "#1D9E75",
     display: "inline-block",
+    animation: "blink 1.3s infinite",
   },
-  userInfo: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    marginLeft: 16,
-  },
-  userName: {
-    color: "#888",
-    fontSize: 13,
-  },
-  logoutBtn: {
-    background: "none",
-    border: "1px solid #333",
-    borderRadius: 6,
-    color: "#888",
-    fontSize: 12,
-    padding: "4px 10px",
-    cursor: "pointer",
-  },
-  columns: {
+  mainCols: {
     flex: 1,
     display: "flex",
+    gap: 36,
     alignItems: "center",
     justifyContent: "center",
-    gap: 40,
-    padding: "40px 24px",
   },
-  soundBanner: {
+  devicesCol: {
+    display: "flex",
+    gap: 32,
+    alignItems: "center",
+  },
+  deviceWrap: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 10,
+  },
+  panelWrap: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    minWidth: 0,
+    justifyContent: "center",
+  },
+  labelTag: {
+    fontSize: 11,
+    color: "#444",
     textAlign: "center",
-    padding: "8px 0",
-    color: "#7F77DD",
-    fontSize: 13,
-    fontWeight: 500,
   },
-  footer: {
+  btnRow: {
     display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 24,
-    padding: "16px 24px",
-    borderTop: "1px solid #222",
-  },
-  demoToggle: {
-    display: "flex",
-    alignItems: "center",
     gap: 8,
   },
-  toggleTrack: {
-    width: 38,
-    height: 20,
-    borderRadius: 10,
-    border: "none",
-    position: "relative",
+  liveBtn: {
+    background: "#0f2218",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#1D9E75",
+    color: "#9FE1CB",
+    borderRadius: 8,
+    padding: "9px 22px",
+    fontSize: 14,
     cursor: "pointer",
-    transition: "background 0.2s",
-    padding: 0,
-  },
-  toggleThumb: {
-    width: 16,
-    height: 16,
-    borderRadius: "50%",
-    background: "#fff",
-    display: "block",
-    transition: "transform 0.2s",
+    fontFamily: "inherit",
+    transition: "all 0.2s",
   },
   playBtn: {
-    padding: "8px 24px",
+    background: "#16142a",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#7F77DD",
+    color: "#CECBF6",
     borderRadius: 8,
-    border: "none",
-    background: "#7F77DD",
-    color: "#fff",
+    padding: "9px 22px",
     fontSize: 14,
-    fontWeight: 600,
     cursor: "pointer",
+    fontFamily: "inherit",
   },
-  micStatus: {
-    color: "#1D9E75",
-    fontSize: 13,
-  },
-  elapsedTimer: {
+  resetBtn: {
+    background: "transparent",
+    borderWidth: "0.5px",
+    borderStyle: "solid",
+    borderColor: "#2a2a2a",
     color: "#555",
-    fontSize: 13,
-    fontVariantNumeric: "tabular-nums",
-    minWidth: 50,
-    textAlign: "right",
+    borderRadius: 8,
+    padding: "9px 18px",
+    fontSize: 14,
+    cursor: "pointer",
+    fontFamily: "inherit",
   },
 };
