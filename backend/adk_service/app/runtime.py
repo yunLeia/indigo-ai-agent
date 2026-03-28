@@ -90,47 +90,40 @@ class GeminiLiveRuntime:
         key: str,
         live_session: object,
     ) -> None:
-        """Read responses from Gemini Live and parse JSON classifications."""
+        """Read responses from Gemini Live and parse keyword-prefixed classifications."""
         queue = self._queues[key]
         text_buffer = ""
 
         async for message in live_session.receive():
-            # native-audio model returns audio + transcription
-            # We read the output_transcription to get text
             sc = getattr(message, "server_content", None)
             if sc is None:
                 continue
 
-            # Check output_transcription (streamed text from audio response)
+            # Collect output_transcription chunks (what the model says, as text)
             ot = getattr(sc, "output_transcription", None)
             if ot and getattr(ot, "text", None):
                 text_buffer += ot.text
-                log.debug("[RUNTIME] Gemini Live transcription chunk | user=%s | text=%r", key, ot.text)
+                log.debug("[RUNTIME] Gemini transcription chunk | user=%s | text=%r", key, ot.text)
 
-            # Also check turn_complete to flush buffer
             turn_complete = getattr(sc, "turn_complete", False)
 
-            # Try to parse complete JSON objects from the buffer
-            frames = _extract_json_frames(text_buffer)
-            for frame, consumed in frames:
-                text_buffer = text_buffer[consumed:]
-                log.info(
-                    "[RUNTIME] << Gemini Live classified | category=%s | confidence=%.2f | transcript=%r",
-                    frame.category,
-                    frame.confidence,
-                    frame.transcript[:100],
-                )
-                await queue.put(frame)
-
-            # On turn complete, if there's leftover text that didn't parse as JSON,
-            # log it so we can debug prompt issues
             if turn_complete and text_buffer.strip():
-                log.warning(
-                    "[RUNTIME] Unparsed text at turn end | user=%s | text=%r",
-                    key,
-                    text_buffer.strip()[:200],
-                )
+                full_text = text_buffer.strip()
                 text_buffer = ""
+
+                log.info("[RUNTIME] Gemini Live full response | user=%s | text=%r", key, full_text)
+
+                frame = _parse_keyword_response(full_text)
+                if frame:
+                    log.info(
+                        "[RUNTIME] << Classified | category=%s | confidence=%.2f | transcript=%r",
+                        frame.category,
+                        frame.confidence,
+                        frame.transcript[:100],
+                    )
+                    await queue.put(frame)
+                else:
+                    log.warning("[RUNTIME] Could not parse response | text=%r", full_text[:200])
 
     async def ingest_audio(
         self,
