@@ -89,7 +89,7 @@ export default function DemoScreen({
   const [elapsed, setElapsed] = useState(0);
   const [alert, setAlert] = useState<AlertEvent | null>(null);
   const [radarActive, setRadarActive] = useState(false);
-  const [locationText, setLocationText] = useState("Chelsea, NY 10011");
+  const [locationText, setLocationText] = useState("New York City");
   const [isLive, setIsLive] = useState(false);
 
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -170,6 +170,12 @@ export default function DemoScreen({
 
       const scenario = msg.scenario === "name" ? "hospital" : "siren";
 
+      // Update scenario and location based on what was detected
+      setSc(scenario);
+      setLocationText(
+        scenario === "siren" ? "Chelsea, NY 10011" : "NYC Subway — Platform",
+      );
+
       setAlert({
         scenario,
         title: msg.title,
@@ -211,15 +217,7 @@ export default function DemoScreen({
     setSteps(INITIAL_STEPS.map((s) => ({ ...s })));
   }, []);
 
-  /* ── Switch scenario ──────────────────────────────────── */
-
-  function switchScenario(s: "siren" | "hospital") {
-    setSc(s);
-    reset();
-    setLocationText(
-      s === "siren" ? "Chelsea, NY 10011" : "NYC Subway — Platform",
-    );
-  }
+  /* ── Scenario is auto-detected from audio ─────────────── */
 
   /* ── Go live (connect WS + mic) ───────────────────────── */
 
@@ -264,26 +262,7 @@ export default function DemoScreen({
         <div style={styles.logo}>
           my<b>Indigo</b>
         </div>
-        <div style={styles.scRow}>
-          <button
-            style={{
-              ...styles.scBtn,
-              ...(sc === "siren" ? styles.scBtnOn : {}),
-            }}
-            onClick={() => switchScenario("siren")}
-          >
-            Siren
-          </button>
-          <button
-            style={{
-              ...styles.scBtn,
-              ...(sc === "hospital" ? styles.scBtnOn : {}),
-            }}
-            onClick={() => switchScenario("hospital")}
-          >
-            Subway announcement
-          </button>
-        </div>
+        <div style={styles.scRow} />
         <div
           style={{
             ...styles.livePill,
