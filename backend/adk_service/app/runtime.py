@@ -64,7 +64,8 @@ class GeminiLiveRuntime:
         )
 
         config = types.LiveConnectConfig(
-            response_modalities=["TEXT"],
+            response_modalities=["AUDIO"],
+            output_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction=GEMINI_LIVE_SYSTEM_INSTRUCTION,
         )
 
@@ -94,12 +95,20 @@ class GeminiLiveRuntime:
         text_buffer = ""
 
         async for message in live_session.receive():
-            text = getattr(message, "text", None)
-            if not text:
+            # native-audio model returns audio + transcription
+            # We read the output_transcription to get text
+            sc = getattr(message, "server_content", None)
+            if sc is None:
                 continue
 
-            text_buffer += text
-            log.debug("[RUNTIME] Gemini Live raw text chunk | user=%s | text=%r", key, text)
+            # Check output_transcription (streamed text from audio response)
+            ot = getattr(sc, "output_transcription", None)
+            if ot and getattr(ot, "text", None):
+                text_buffer += ot.text
+                log.debug("[RUNTIME] Gemini Live transcription chunk | user=%s | text=%r", key, ot.text)
+
+            # Also check turn_complete to flush buffer
+            turn_complete = getattr(sc, "turn_complete", False)
 
             # Try to parse complete JSON objects from the buffer
             frames = _extract_json_frames(text_buffer)
@@ -112,6 +121,16 @@ class GeminiLiveRuntime:
                     frame.transcript[:100],
                 )
                 await queue.put(frame)
+
+            # On turn complete, if there's leftover text that didn't parse as JSON,
+            # log it so we can debug prompt issues
+            if turn_complete and text_buffer.strip():
+                log.warning(
+                    "[RUNTIME] Unparsed text at turn end | user=%s | text=%r",
+                    key,
+                    text_buffer.strip()[:200],
+                )
+                text_buffer = ""
 
     async def ingest_audio(
         self,
