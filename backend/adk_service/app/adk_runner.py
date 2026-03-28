@@ -61,28 +61,28 @@ async def _run_agent_once(
     prompt: str,
     state: Optional[Dict[str, Any]] = None,
 ) -> str:
-    runner = Runner(
+    final_text = ""
+    async with Runner(
         app_name=settings.adk_app_name,
         agent=agent,
         session_service=_SESSION_SERVICE,
-    )
-    session = await _SESSION_SERVICE.create_session(
-        app_name=settings.adk_app_name,
-        user_id=user_id,
-        session_id=str(uuid4()),
-        state=state or {},
-    )
+    ) as runner:
+        session = await _SESSION_SERVICE.create_session(
+            app_name=settings.adk_app_name,
+            user_id=user_id,
+            session_id=str(uuid4()),
+            state=state or {},
+        )
 
-    final_text = ""
-    async for event in runner.run_async(
-        user_id=user_id,
-        session_id=session.id,
-        new_message=types.UserContent(parts=[types.Part(text=prompt)]),
-    ):
-        if event.author == agent.name and event.is_final_response():
-            candidate = _content_to_text(event.content)
-            if candidate:
-                final_text = candidate
+        async for event in runner.run_async(
+            user_id=user_id,
+            session_id=session.id,
+            new_message=types.UserContent(parts=[types.Part(text=prompt)]),
+        ):
+            if event.author == agent.name and event.is_final_response():
+                candidate = _content_to_text(event.content)
+                if candidate:
+                    final_text = candidate
 
     if not final_text:
         raise RuntimeError(f"{agent.name} did not return a final text response.")
@@ -228,8 +228,8 @@ async def run_adk_reasoning(
     scenario: ScenarioName,
     user_name: str,
 ) -> Dict[str, Any]:
-    if settings.gemini_api_key:
-        os.environ["GOOGLE_API_KEY"] = settings.gemini_api_key
+    if settings.adk_gemini_api_key:
+        os.environ["GOOGLE_API_KEY"] = settings.adk_gemini_api_key
         os.environ.pop("GEMINI_API_KEY", None)
 
     vehicle_sound_agent, name_detection_agent, alert_planner_agent = _load_agents()

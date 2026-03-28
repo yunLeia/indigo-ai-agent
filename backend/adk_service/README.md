@@ -41,6 +41,7 @@ uvicorn app.main:app --reload --port 8001
 
 Environment:
 - `NEXT_PIPELINE_URL`
+- `ADK_GEMINI_API_KEY`
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL`
 - `ADK_AGENT_MODEL`
@@ -50,7 +51,11 @@ Environment:
 - `ADK_AUDIO_INPUT_MODE=browser-webm|pcm16`
 
 Notes:
-- the service derives `GOOGLE_API_KEY` from `GEMINI_API_KEY` for ADK calls
+- the service uses backend key precedence:
+  - `ADK_GEMINI_API_KEY`
+  - then `GOOGLE_API_KEY`
+  - then `GEMINI_API_KEY`
+- the service derives `GOOGLE_API_KEY` from the selected backend key for ADK calls
 - `ADK_AGENT_MODEL` lets us lower cost / change backend reasoning models without touching the rest of the live stack
 - `ADK_APP_NAME` stays configurable because ADK infers app names from local package layout during session lookup
 

@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 from app.config import settings
 from app.contracts import AudioChunkMessage, DebugOrchestrateRequest, InitMessage
-from app.orchestrator import run_orchestration
+from app.orchestrator import get_adk_runtime_status, run_orchestration
 from app.runtime import build_runtime
 from app.session import AudioSession
 
@@ -30,6 +30,9 @@ async def debug_config() -> dict[str, Any]:
         "model": settings.gemini_model,
         "adk_agent_model": settings.adk_agent_model,
         "adk_app_name": settings.adk_app_name,
+        "adk_key_source": settings.adk_gemini_api_key_source,
+        "adk_key_present": bool(settings.adk_gemini_api_key),
+        "adk_runtime": get_adk_runtime_status(),
     }
 
 

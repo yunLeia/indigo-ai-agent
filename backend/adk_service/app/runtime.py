@@ -73,7 +73,7 @@ class GeminiLiveRuntime(BaseRealtimeRuntime):
     """
 
     def __init__(self) -> None:
-        self.api_key = settings.gemini_api_key
+        self.api_key = settings.adk_gemini_api_key
         self.model = settings.gemini_model
         self.client = genai.Client(api_key=self.api_key)
         self._sessions: dict[str, object] = {}

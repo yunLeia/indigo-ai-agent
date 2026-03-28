@@ -29,6 +29,19 @@ _load_env_files()
 
 class ServiceSettings:
     def __init__(self) -> None:
+        adk_key_candidates = [
+            ("ADK_GEMINI_API_KEY", os.getenv("ADK_GEMINI_API_KEY", "")),
+            ("GOOGLE_API_KEY", os.getenv("GOOGLE_API_KEY", "")),
+            ("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", "")),
+        ]
+        self.adk_gemini_api_key = ""
+        self.adk_gemini_api_key_source = "missing"
+        for source, value in adk_key_candidates:
+            if value:
+                self.adk_gemini_api_key = value
+                self.adk_gemini_api_key_source = source
+                break
+
         self.next_pipeline_url = os.getenv(
             "NEXT_PIPELINE_URL",
             "http://localhost:3000/api/live/ingest",
