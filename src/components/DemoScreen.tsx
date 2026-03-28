@@ -181,13 +181,7 @@ export default function DemoScreen({
 
   /* ── WebSocket (real backend) ─────────────────────────── */
 
-  const {
-    connected,
-    connect,
-    disconnect,
-    sendAudioChunk,
-    runScenarioDemo,
-  } = useAgentWebSocket({
+  const { connected, connect, disconnect, sendAudioChunk } = useAgentWebSocket({
     url: WS_URL,
     userName,
     userId: "demo-user",
@@ -223,7 +217,7 @@ export default function DemoScreen({
     setSc(s);
     reset();
     setLocationText(
-      s === "siren" ? "Chelsea, NY 10011" : "NYU Langone — Lobby",
+      s === "siren" ? "Chelsea, NY 10011" : "NYC Subway — Platform",
     );
   }
 
@@ -248,34 +242,17 @@ export default function DemoScreen({
     }
   }
 
-  /* ── Play demo (simulated messages) ───────────────────── */
-
-  function playDemo() {
-    reset();
-    setLocationText(
-      sc === "siren" ? "Chelsea, NY 10011" : "NYU Langone — Lobby",
-    );
-
-    if (sc === "siren") setRadarActive(true);
-    runScenarioDemo();
-  }
+  /* ── Play demo removed — live only ─────────────────────── */
 
   /* ── Watch alert mapping ──────────────────────────────── */
 
   const watchAlert: AlertEvent | null = alert
-    ? sc === "siren"
-      ? {
-          scenario: "siren",
-          title: "Fire truck behind you",
-          subtitle: "Move right · Engine 14",
-          risk: alert.risk,
-        }
-      : {
-          scenario: "hospital",
-          title: "Your name was called",
-          subtitle: "Exam Room 3 · 2nd floor",
-          risk: alert.risk,
-        }
+    ? {
+        scenario: alert.scenario,
+        title: alert.title,
+        subtitle: alert.subtitle,
+        risk: alert.risk,
+      }
     : null;
 
   /* ── Render ───────────────────────────────────────────── */
@@ -295,7 +272,7 @@ export default function DemoScreen({
             }}
             onClick={() => switchScenario("siren")}
           >
-            Emergency vehicle
+            Siren
           </button>
           <button
             style={{
@@ -304,7 +281,7 @@ export default function DemoScreen({
             }}
             onClick={() => switchScenario("hospital")}
           >
-            Hospital PA
+            Subway announcement
           </button>
         </div>
         <div
@@ -372,9 +349,6 @@ export default function DemoScreen({
           onClick={toggleLive}
         >
           {isLive ? "⏹ Stop listening" : "🎙 Go live"}
-        </button>
-        <button style={styles.playBtn} onClick={playDemo}>
-          ▶ Play demo
         </button>
         <button style={styles.resetBtn} onClick={reset}>
           Reset
@@ -506,18 +480,6 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
     fontFamily: "inherit",
     transition: "all 0.2s",
-  },
-  playBtn: {
-    background: "#16142a",
-    borderWidth: "0.5px",
-    borderStyle: "solid",
-    borderColor: "#7F77DD",
-    color: "#CECBF6",
-    borderRadius: 8,
-    padding: "9px 22px",
-    fontSize: 14,
-    cursor: "pointer",
-    fontFamily: "inherit",
   },
   resetBtn: {
     background: "transparent",

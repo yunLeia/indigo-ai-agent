@@ -21,7 +21,7 @@ from app.session import AudioSession
 log = logging.getLogger("myindigo.runtime")
 
 # Classify every N seconds of accumulated audio
-CLASSIFY_INTERVAL = 3.0
+CLASSIFY_INTERVAL = 5.0
 SAMPLE_RATE = 16000
 
 
@@ -51,6 +51,7 @@ class GeminiClassifyRuntime:
         self._buffers: dict[str, bytearray] = {}
         self._last_classify: dict[str, float] = {}
         self._classify_lock: dict[str, asyncio.Lock] = {}
+        self._backoff_until: float = 0.0
 
         log.info(
             "[RUNTIME] GeminiClassifyRuntime initialized | model=%s | interval=%.1fs",
@@ -124,6 +125,12 @@ class GeminiClassifyRuntime:
         wav_bytes: bytes,
     ) -> Optional[ClassifiedFrame]:
         """Send audio to Gemini and parse the classification response."""
+        # Rate limit backoff
+        if self._backoff_until > time.time():
+            wait = int(self._backoff_until - time.time())
+            log.warning("[RUNTIME] Rate limited, waiting %ds", wait)
+            return None
+
         start = time.time()
 
         prompt = CLASSIFY_PROMPT.format(user_name=session.user_name)
@@ -147,7 +154,12 @@ class GeminiClassifyRuntime:
                 ],
             )
         except Exception as exc:
-            log.error("[RUNTIME] Gemini API call failed: %s", exc)
+            err = str(exc)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                self._backoff_until = time.time() + 30
+                log.warning("[RUNTIME] Rate limited — backing off 30s")
+            else:
+                log.error("[RUNTIME] Gemini API call failed: %s", exc)
             return None
 
         elapsed_ms = int((time.time() - start) * 1000)

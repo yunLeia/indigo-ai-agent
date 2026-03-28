@@ -77,7 +77,7 @@ async def dispatch_and_run(
         })
         await send_event({
             "type": "agent_update",
-            "agent": "siren",
+            "agent": "vehicle",
             "status": "active",
             "output": "Analyzing emergency sound...",
         })
@@ -92,7 +92,7 @@ async def dispatch_and_run(
             log.error("[DISPATCH] SirenAgent failed: %s", exc)
             await send_event({
                 "type": "agent_update",
-                "agent": "siren",
+                "agent": "vehicle",
                 "status": "done",
                 "output": f"Error: {exc}",
             })
@@ -101,7 +101,7 @@ async def dispatch_and_run(
         confirmed = result.get("confirmed", False)
         await send_event({
             "type": "agent_update",
-            "agent": "siren",
+            "agent": "vehicle",
             "status": "done",
             "output": result.get("reason", "Analysis complete"),
         })
@@ -194,7 +194,7 @@ async def dispatch_and_run(
             await send_event({
                 "type": "alert",
                 "scenario": "name",
-                "title": result.get("title", "Your name was called"),
+                "title": result.get("title", "Announcement detected"),
                 "subtitle": result.get("subtitle", "Check the announcement"),
                 "risk": "MEDIUM",
             })

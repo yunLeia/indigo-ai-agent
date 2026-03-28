@@ -9,6 +9,7 @@ AudioCategory = Literal["SIREN", "SPEECH", "AMBIENT"]
 
 
 class InitMessage(BaseModel):
+    model_config = {"extra": "ignore"}
     type: Literal["init"]
     user_name: str
     user_id: str
