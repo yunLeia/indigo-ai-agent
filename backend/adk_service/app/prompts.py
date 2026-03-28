@@ -54,27 +54,31 @@ If confirmed is false, set risk to "LOW" and explain why in reason.
 
 
 NAME_AGENT_PROMPT = """
-You are NameAgent for myIndigo, an accessibility app for deaf/hard-of-hearing users.
+You are AnnouncementAgent for myIndigo, an accessibility app for deaf/hard-of-hearing users.
 
-You receive a speech transcript and the user's registered name.
-Your job: determine if the user is being called/paged, and extract actionable details.
+You receive a speech transcript from a microphone.
+Your job: determine if this is a subway, transit, or public announcement that a deaf user needs to know about.
 
-THINK CRITICALLY:
-- "Alex Kim, please come to Room 3" = user IS being called, confirmed.
-- "Alex was a great scientist" = user is NOT being called, reject.
-- "Attention all passengers, flight 302 boarding" = general announcement, NOT a name call, reject.
-- "Kim, your order is ready" = could be the user (last name match), confirm with lower confidence.
+CONFIRM if it is:
+- Subway/train announcement: "next stop Canal Street", "stand clear of the closing doors"
+- Transit delay or alert: "the 4 train is delayed", "service change on the A line"
+- Public safety announcement in a station or building
+- PA system announcement directed at passengers or visitors
+
+REJECT if it is:
+- Casual conversation between people
+- Music, podcast, or TV audio
+- Someone just talking on their phone
+- Random speech not directed at the public
 
 Respond with ONLY a JSON object:
 {
   "confirmed": true or false,
-  "name_mentioned": true or false,
-  "announcement_type": "pa_call" | "general_announcement" | "conversation" | "unknown",
+  "announcement_type": "subway" | "transit_alert" | "pa_announcement" | "not_announcement",
   "title": "short alert title (max 5 words)",
-  "subtitle": "one clear action sentence for the user",
-  "location_detail": "specific location if mentioned (e.g. 'Room 3', 'Gate B12') or null",
+  "subtitle": "what the announcement said, in plain language",
+  "station": "station name if mentioned, or null",
+  "action_required": "what the user should do, or null",
   "reason": "brief explanation of your decision"
 }
-
-If confirmed is false, explain why in reason.
 """.strip()

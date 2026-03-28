@@ -16,13 +16,6 @@ DEBOUNCE_SECONDS = 8
 _last_alert: dict[str, float] = {}
 
 
-def _name_matches(transcript: str, user_name: str) -> bool:
-    """Fast rule-based check: does the transcript contain the user's name?"""
-    t = transcript.lower()
-    full = user_name.lower().strip()
-    first = full.split()[0] if full else ""
-    return full in t or (len(first) >= 2 and first in t)
-
 
 async def dispatch_and_run(
     *,
@@ -134,40 +127,31 @@ async def dispatch_and_run(
             )
         return
 
-    # ── Route: SPEECH → check name → NameAgent ──
+    # ── Route: SPEECH → NameAgent (all speech goes to analysis) ──
     if category == "SPEECH":
         if not transcript:
             log.info("[DISPATCH] Dropped SPEECH (empty transcript)")
             return
 
-        has_name = _name_matches(transcript, user_name)
-        log.info(
-            "[DISPATCH] SPEECH received | name_match=%s | user_name=%r",
-            has_name,
-            user_name,
-        )
-
-        if not has_name:
-            log.info("[DISPATCH] Dropped SPEECH (name not found in transcript)")
-            return
+        log.info("[DISPATCH] SPEECH received | transcript=%r", transcript[:100])
 
         # Debounce
         now = time.time()
         if now - _last_alert.get("name", 0) < DEBOUNCE_SECONDS:
-            log.info("[DISPATCH] Debounced name (within %ds window)", DEBOUNCE_SECONDS)
+            log.info("[DISPATCH] Debounced speech (within %ds window)", DEBOUNCE_SECONDS)
             return
 
-        log.info("[DISPATCH] Name matched → routing to NameAgent")
+        log.info("[DISPATCH] Routing to NameAgent")
         await send_event({
             "type": "sound_detected",
-            "text": f"Speech detected: \"{transcript[:60]}...\"" if len(transcript) > 60 else f"Speech detected: \"{transcript}\"",
+            "text": f"Speech: \"{transcript[:80]}\"" if len(transcript) <= 80 else f"Speech: \"{transcript[:77]}...\"",
             "latency_ms": 0,
         })
         await send_event({
             "type": "agent_update",
             "agent": "dispatch",
             "status": "done",
-            "output": f"Name '{user_name}' found in speech → NameAgent",
+            "output": "Speech detected → NameAgent",
         })
         await send_event({
             "type": "agent_update",

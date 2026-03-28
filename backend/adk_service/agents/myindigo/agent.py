@@ -17,6 +17,6 @@ siren_agent = LlmAgent(
 name_agent = LlmAgent(
     name="name_agent",
     model=MODEL,
-    description="Confirms if a deaf user's name was called in a PA announcement.",
+    description="Confirms if speech is a subway or transit announcement a deaf user needs.",
     instruction=NAME_AGENT_PROMPT,
 )
