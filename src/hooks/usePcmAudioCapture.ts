@@ -12,6 +12,8 @@ type UsePcmAudioCaptureOptions = {
   onChunk: (chunk: PcmAudioChunk) => void;
   frameSize?: number;
   targetSampleRate?: 16000;
+  rmsThreshold?: number;
+  minActiveFrames?: number;
 };
 
 function floatTo16BitPcm(input: Float32Array) {
@@ -73,16 +75,33 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
+function getRmsLevel(buffer: Float32Array) {
+  if (buffer.length === 0) {
+    return 0;
+  }
+
+  let sumSquares = 0;
+  for (let i = 0; i < buffer.length; i += 1) {
+    const sample = buffer[i] ?? 0;
+    sumSquares += sample * sample;
+  }
+
+  return Math.sqrt(sumSquares / buffer.length);
+}
+
 export function usePcmAudioCapture({
   onChunk,
   frameSize = 4096,
   targetSampleRate = 16000,
+  rmsThreshold = 0.02,
+  minActiveFrames = 2,
 }: UsePcmAudioCaptureOptions) {
   const [capturing, setCapturing] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
+  const activeFrameCountRef = useRef(0);
 
   const stop = useCallback(() => {
     processorNodeRef.current?.disconnect();
@@ -100,6 +119,7 @@ export function usePcmAudioCapture({
     sourceNodeRef.current = null;
     audioContextRef.current = null;
     streamRef.current = null;
+    activeFrameCountRef.current = 0;
     setCapturing(false);
   }, []);
 
@@ -127,6 +147,18 @@ export function usePcmAudioCapture({
 
     processor.onaudioprocess = (event) => {
       const input = event.inputBuffer.getChannelData(0);
+      const rms = getRmsLevel(input);
+
+      if (rms < rmsThreshold) {
+        activeFrameCountRef.current = 0;
+        return;
+      }
+
+      activeFrameCountRef.current += 1;
+      if (activeFrameCountRef.current < minActiveFrames) {
+        return;
+      }
+
       const downsampled = downsampleBuffer(
         input,
         audioContext.sampleRate,
@@ -148,8 +180,16 @@ export function usePcmAudioCapture({
     audioContextRef.current = audioContext;
     sourceNodeRef.current = source;
     processorNodeRef.current = processor;
+    activeFrameCountRef.current = 0;
     setCapturing(true);
-  }, [capturing, frameSize, onChunk, targetSampleRate]);
+  }, [
+    capturing,
+    frameSize,
+    minActiveFrames,
+    onChunk,
+    rmsThreshold,
+    targetSampleRate,
+  ]);
 
   return { capturing, start, stop };
 }

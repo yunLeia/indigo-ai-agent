@@ -128,9 +128,9 @@ export function useAgentWebSocket({
   onConnectionChange,
 }: UseAgentWebSocketOptions) {
   const [connected, setConnected] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
   const onMessageRef = useRef(onMessage);
   const onConnectionChangeRef = useRef(onConnectionChange);
-  const runTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const inFlightRef = useRef(false);
 
@@ -144,26 +144,57 @@ export function useAgentWebSocket({
   }, [onConnectionChange]);
 
   const connect = useCallback(() => {
-    if (connected) return;
-
-    void url;
-    void userId;
-
-    setConnected(true);
-    onConnectionChangeRef.current?.(true);
-  }, [connected, url, userId]);
-
-  const disconnect = useCallback(() => {
-    if (runTimeoutRef.current) {
-      clearTimeout(runTimeoutRef.current);
-      runTimeoutRef.current = null;
+    if (wsRef.current) {
+      return;
     }
 
+    const ws = new WebSocket(url);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setConnected(true);
+      onConnectionChangeRef.current?.(true);
+      ws.send(
+        JSON.stringify({
+          type: "init",
+          user_name: userName,
+          user_id: userId,
+          scenario,
+        }),
+      );
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data) as ServerMessage;
+        onMessageRef.current(message);
+      } catch {
+        // Ignore malformed websocket payloads from local dev services.
+      }
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+      setConnected(false);
+      onConnectionChangeRef.current?.(false);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  }, [scenario, url, userId, userName]);
+
+  const disconnect = useCallback(() => {
     messageTimeoutsRef.current.forEach(clearTimeout);
     messageTimeoutsRef.current = [];
     inFlightRef.current = false;
-    setConnected(false);
-    onConnectionChangeRef.current?.(false);
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    } else {
+      setConnected(false);
+      onConnectionChangeRef.current?.(false);
+    }
   }, []);
 
   const runPipeline = useCallback(async (forceRun?: boolean) => {
@@ -221,22 +252,20 @@ export function useAgentWebSocket({
     }
   }, [connected, scenario, userName]);
 
-  const sendAudioChunk = useCallback(
-    (_base64: string) => {
-      if (!connected) {
-        return;
-      }
+  const sendAudioChunk = useCallback((base64: string) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) {
+      return;
+    }
 
-      if (runTimeoutRef.current) {
-        clearTimeout(runTimeoutRef.current);
-      }
-
-      runTimeoutRef.current = setTimeout(() => {
-        void runPipeline();
-      }, 900);
-    },
-    [connected, runPipeline],
-  );
+    wsRef.current.send(
+      JSON.stringify({
+        type: "audio_chunk",
+        data: base64,
+        format: "pcm16",
+        sample_rate_hz: 16000,
+      }),
+    );
+  }, []);
 
   const runScenarioDemo = useCallback(() => {
     void runPipeline(true);
