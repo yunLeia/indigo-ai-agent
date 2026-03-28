@@ -36,6 +36,7 @@ supabase/.temp
 
 # vibe coding
 .claude
+docs
 
 # python
 __pycache__/

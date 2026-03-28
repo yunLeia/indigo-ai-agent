@@ -1,148 +1,222 @@
 from __future__ import annotations
 
-import re
-from datetime import datetime, timedelta, timezone
+import logging
+import time
 from typing import Any, Optional
 
-from app.adk_runner import run_adk_reasoning
+from app.adk_runner import run_agent
 from app.config import settings
-from app.contracts import OrchestrationMode, ScenarioName, ServerEvent
-from app.pipeline_bridge import map_pipeline_to_events, run_existing_pipeline
+from app.contracts import AudioCategory, ServerEvent
+from app.runtime import ClassifiedFrame
 
-_ADK_BACKOFF_UNTIL: Optional[datetime] = None
+log = logging.getLogger("myindigo.orchestrator")
 
-
-def _current_utc() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _seconds_until_backoff_expires() -> int:
-    if _ADK_BACKOFF_UNTIL is None:
-        return 0
-
-    remaining = (_ADK_BACKOFF_UNTIL - _current_utc()).total_seconds()
-    return max(0, int(remaining))
+# Debounce: don't fire the same scenario twice within this window
+DEBOUNCE_SECONDS = 8
+_last_alert: dict[str, float] = {}
 
 
-def _parse_retry_after_seconds(message: str) -> Optional[int]:
-    retry_patterns = [
-        r"retryDelay': '(\d+)s'",
-        r"retry in ([0-9]+(?:\.[0-9]+)?)s",
-        r"Please retry in ([0-9]+(?:\.[0-9]+)?)s",
-    ]
-    for pattern in retry_patterns:
-        match = re.search(pattern, message)
-        if match:
-            return max(1, int(float(match.group(1))))
-    return None
+def _name_matches(transcript: str, user_name: str) -> bool:
+    """Fast rule-based check: does the transcript contain the user's name?"""
+    t = transcript.lower()
+    full = user_name.lower().strip()
+    first = full.split()[0] if full else ""
+    return full in t or (len(first) >= 2 and first in t)
 
 
-def _build_fallback_metadata(
+async def dispatch_and_run(
     *,
-    reason: str,
-    kind: str,
-    retry_after_seconds: Optional[int] = None,
-) -> dict[str, Any]:
-    metadata: dict[str, Any] = {
-        "mode": "bridge",
-        "kind": kind,
-        "reason": reason,
-        "at": _current_utc().isoformat(),
-    }
-    if retry_after_seconds:
-        metadata["retry_after_seconds"] = retry_after_seconds
-    return metadata
+    frame: ClassifiedFrame,
+    user_name: str,
+    send_event: Any,
+) -> None:
+    """
+    Rule-based dispatch + ADK agent execution.
 
+    1. Look at Gemini Live's classification (SIREN/SPEECH/AMBIENT)
+    2. Route to the right ADK agent (or drop)
+    3. Send WebSocket events as the pipeline progresses
+    """
+    category = frame.category
+    transcript = frame.transcript
+    confidence = frame.confidence
 
-def _classify_adk_error(exc: Exception) -> dict[str, Any]:
-    reason = str(exc)
-    lowered = reason.lower()
-    retry_after_seconds = _parse_retry_after_seconds(reason)
-
-    if "resource_exhausted" in lowered or "quota exceeded" in lowered:
-        return _build_fallback_metadata(
-            reason=reason,
-            kind="quota_exhausted",
-            retry_after_seconds=retry_after_seconds,
-        )
-
-    if "api key" in lowered or "permission_denied" in lowered:
-        return _build_fallback_metadata(reason=reason, kind="credentials")
-
-    return _build_fallback_metadata(
-        reason=reason,
-        kind="adk_error",
-        retry_after_seconds=retry_after_seconds,
+    log.info(
+        "[DISPATCH] Received frame | category=%s | confidence=%.2f | transcript=%r",
+        category,
+        confidence,
+        transcript[:100],
     )
 
+    # ── Gate: confidence threshold ──
+    if confidence < settings.confidence_threshold:
+        log.info(
+            "[DISPATCH] Dropped (low confidence %.2f < %.2f)",
+            confidence,
+            settings.confidence_threshold,
+        )
+        return
 
-def get_adk_runtime_status() -> dict[str, Any]:
-    remaining_seconds = _seconds_until_backoff_expires()
-    return {
-        "backoff_active": remaining_seconds > 0,
-        "backoff_remaining_seconds": remaining_seconds,
-    }
+    # ── Gate: AMBIENT → drop ──
+    if category == "AMBIENT":
+        log.info("[DISPATCH] Dropped AMBIENT")
+        return
 
+    # ── Route: SIREN → SirenAgent ──
+    if category == "SIREN":
+        # Debounce
+        now = time.time()
+        if now - _last_alert.get("siren", 0) < DEBOUNCE_SECONDS:
+            log.info("[DISPATCH] Debounced siren (within %ds window)", DEBOUNCE_SECONDS)
+            return
 
-async def run_orchestration(
-    *,
-    transcript: str,
-    confidence: float,
-    scenario: ScenarioName,
-    user_name: str,
-    mode_override: Optional[OrchestrationMode] = None,
-) -> tuple[dict[str, Any], list[ServerEvent]]:
-    mode = mode_override or settings.orchestration_mode
-
-    if mode == "adk":
-        backoff_remaining = _seconds_until_backoff_expires()
-        if backoff_remaining > 0:
-            result = await run_existing_pipeline(
-                transcript=transcript,
-                confidence=confidence,
-                scenario=scenario,
-            )
-            result["_fallback"] = _build_fallback_metadata(
-                reason="ADK is temporarily cooling down after a quota error.",
-                kind="adk_cooldown",
-                retry_after_seconds=backoff_remaining,
-            )
-            events = map_pipeline_to_events(result, scenario)
-            return result, events
+        log.info("[DISPATCH] Routing to SirenAgent")
+        await send_event({
+            "type": "sound_detected",
+            "text": transcript or "Emergency sound detected",
+            "latency_ms": 0,
+        })
+        await send_event({
+            "type": "agent_update",
+            "agent": "dispatch",
+            "status": "done",
+            "output": f"Emergency sound detected (confidence: {confidence:.0%}) → SirenAgent",
+        })
+        await send_event({
+            "type": "agent_update",
+            "agent": "siren",
+            "status": "active",
+            "output": "Analyzing emergency sound...",
+        })
 
         try:
-            result = await run_adk_reasoning(
+            result = await run_agent(
+                agent_name="siren",
                 transcript=transcript,
-                scenario=scenario,
                 user_name=user_name,
             )
-            events = map_pipeline_to_events(result, scenario)
-            return result, events
         except Exception as exc:
-            if not settings.demo_mode:
-                raise
+            log.error("[DISPATCH] SirenAgent failed: %s", exc)
+            await send_event({
+                "type": "agent_update",
+                "agent": "siren",
+                "status": "done",
+                "output": f"Error: {exc}",
+            })
+            return
 
-            fallback = _classify_adk_error(exc)
-            retry_after_seconds = fallback.get("retry_after_seconds")
-            if retry_after_seconds:
-                global _ADK_BACKOFF_UNTIL
-                _ADK_BACKOFF_UNTIL = _current_utc() + timedelta(
-                    seconds=retry_after_seconds
-                )
+        confirmed = result.get("confirmed", False)
+        await send_event({
+            "type": "agent_update",
+            "agent": "siren",
+            "status": "done",
+            "output": result.get("reason", "Analysis complete"),
+        })
 
-            result = await run_existing_pipeline(
-                transcript=transcript,
-                confidence=confidence,
-                scenario=scenario,
+        if confirmed:
+            _last_alert["siren"] = now
+            log.info(
+                "[DISPATCH] SirenAgent CONFIRMED | risk=%s | title=%r",
+                result.get("risk"),
+                result.get("title"),
             )
-            result["_fallback"] = fallback
-            events = map_pipeline_to_events(result, scenario)
-            return result, events
+            await send_event({
+                "type": "alert",
+                "scenario": "siren",
+                "title": result.get("title", "Emergency sound detected"),
+                "subtitle": result.get("subtitle", "Check your surroundings"),
+                "risk": result.get("risk", "HIGH"),
+            })
+        else:
+            log.info(
+                "[DISPATCH] SirenAgent REJECTED | reason=%r",
+                result.get("reason"),
+            )
+        return
 
-    result = await run_existing_pipeline(
-        transcript=transcript,
-        confidence=confidence,
-        scenario=scenario,
-    )
-    events = map_pipeline_to_events(result, scenario)
-    return result, events
+    # ── Route: SPEECH → check name → NameAgent ──
+    if category == "SPEECH":
+        if not transcript:
+            log.info("[DISPATCH] Dropped SPEECH (empty transcript)")
+            return
+
+        has_name = _name_matches(transcript, user_name)
+        log.info(
+            "[DISPATCH] SPEECH received | name_match=%s | user_name=%r",
+            has_name,
+            user_name,
+        )
+
+        if not has_name:
+            log.info("[DISPATCH] Dropped SPEECH (name not found in transcript)")
+            return
+
+        # Debounce
+        now = time.time()
+        if now - _last_alert.get("name", 0) < DEBOUNCE_SECONDS:
+            log.info("[DISPATCH] Debounced name (within %ds window)", DEBOUNCE_SECONDS)
+            return
+
+        log.info("[DISPATCH] Name matched → routing to NameAgent")
+        await send_event({
+            "type": "sound_detected",
+            "text": f"Speech detected: \"{transcript[:60]}...\"" if len(transcript) > 60 else f"Speech detected: \"{transcript}\"",
+            "latency_ms": 0,
+        })
+        await send_event({
+            "type": "agent_update",
+            "agent": "dispatch",
+            "status": "done",
+            "output": f"Name '{user_name}' found in speech → NameAgent",
+        })
+        await send_event({
+            "type": "agent_update",
+            "agent": "name",
+            "status": "active",
+            "output": "Analyzing announcement...",
+        })
+
+        try:
+            result = await run_agent(
+                agent_name="name",
+                transcript=transcript,
+                user_name=user_name,
+            )
+        except Exception as exc:
+            log.error("[DISPATCH] NameAgent failed: %s", exc)
+            await send_event({
+                "type": "agent_update",
+                "agent": "name",
+                "status": "done",
+                "output": f"Error: {exc}",
+            })
+            return
+
+        confirmed = result.get("confirmed", False)
+        await send_event({
+            "type": "agent_update",
+            "agent": "name",
+            "status": "done",
+            "output": result.get("reason", "Analysis complete"),
+        })
+
+        if confirmed:
+            _last_alert["name"] = now
+            log.info(
+                "[DISPATCH] NameAgent CONFIRMED | title=%r | location=%r",
+                result.get("title"),
+                result.get("location_detail"),
+            )
+            await send_event({
+                "type": "alert",
+                "scenario": "name",
+                "title": result.get("title", "Your name was called"),
+                "subtitle": result.get("subtitle", "Check the announcement"),
+                "risk": "MEDIUM",
+            })
+        else:
+            log.info(
+                "[DISPATCH] NameAgent REJECTED | reason=%r",
+                result.get("reason"),
+            )
+        return

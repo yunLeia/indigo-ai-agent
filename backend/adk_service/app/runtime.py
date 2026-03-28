@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import re
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -9,88 +13,64 @@ from google.genai import types
 
 from app.audio_codec import build_audio_decoder
 from app.config import settings
-from app.contracts import AudioChunkMessage, ScenarioName
+from app.contracts import AudioCategory, AudioChunkMessage
+from app.prompts import GEMINI_LIVE_SYSTEM_INSTRUCTION
 from app.session import AudioSession
+
+log = logging.getLogger("myindigo.runtime")
 
 
 @dataclass
-class TranscriptFrame:
-    text: str
+class ClassifiedFrame:
+    """Output from Gemini Live: a classified audio event."""
+
+    category: AudioCategory
+    transcript: str
     confidence: float
-    is_final: bool
-    scenario: ScenarioName
+    raw_text: str
 
 
-class BaseRealtimeRuntime:
-    async def ingest_audio(
-        self,
-        session: AudioSession,
-        _chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
-        raise NotImplementedError
-
-    async def close_session(self, _session: AudioSession) -> None:
-        return None
-
-    async def shutdown(self) -> None:
-        return None
-
-
-class DemoTranscriptRuntime(BaseRealtimeRuntime):
-    DEMO_TRANSCRIPTS = {
-        "siren": "I can hear a siren and a fire truck is approaching from behind.",
-        "hospital": "Alex Kim, please proceed to Exam Room 3 now.",
-    }
-
-    async def ingest_audio(
-        self,
-        session: AudioSession,
-        chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
-        build_audio_decoder(chunk).decode(chunk)
-        session.register_chunk()
-        if not session.ready_for_demo_final:
-            return None
-
-        session.final_text = self.DEMO_TRANSCRIPTS[session.scenario]
-        return TranscriptFrame(
-            text=session.final_text,
-            confidence=0.96 if session.scenario == "siren" else 0.91,
-            is_final=True,
-            scenario=session.scenario,
-        )
-
-
-class GeminiLiveRuntime(BaseRealtimeRuntime):
+class GeminiLiveRuntime:
     """
-    Placeholder runtime for the real Gemini Live streaming path.
-
-    Planned implementation:
-    - decode browser audio chunks into the format expected by Gemini Live
-    - maintain a persistent session per websocket client
-    - emit partial frames and final transcript frames
-    - optionally route transcript text to ADK specialist agents
+    Streams PCM16 audio to Gemini Live and receives JSON classifications.
+    Gemini Live is the "ears" — it hears audio and outputs structured JSON
+    with category (SIREN/SPEECH/AMBIENT), transcript, and confidence.
     """
 
     def __init__(self) -> None:
         self.api_key = settings.adk_gemini_api_key
-        self.model = settings.gemini_model
+        self.model = settings.gemini_live_model
         self.client = genai.Client(api_key=self.api_key)
         self._sessions: dict[str, object] = {}
         self._session_contexts: dict[str, object] = {}
         self._receive_tasks: dict[str, asyncio.Task[None]] = {}
-        self._queues: dict[str, asyncio.Queue[TranscriptFrame]] = {}
+        self._queues: dict[str, asyncio.Queue[ClassifiedFrame]] = {}
+
+        log.info(
+            "[RUNTIME] GeminiLiveRuntime initialized | model=%s | key_present=%s",
+            self.model,
+            bool(self.api_key),
+        )
 
     async def _ensure_session(self, session: AudioSession) -> object:
         key = session.user_id
         if key in self._sessions:
             return self._sessions[key]
 
+        log.info(
+            "[RUNTIME] Opening Gemini Live session | user=%s | model=%s",
+            key,
+            self.model,
+        )
+
+        config = types.LiveConnectConfig(
+            response_modalities=["TEXT"],
+            system_instruction=GEMINI_LIVE_SYSTEM_INSTRUCTION,
+        )
+
         live_context = self.client.aio.live.connect(
             model=self.model,
-            config={
-                "response_modalities": ["TEXT"],
-            },
+            config=config,
         )
         live_session = await live_context.__aenter__()
         session.live_session_key = key
@@ -98,47 +78,51 @@ class GeminiLiveRuntime(BaseRealtimeRuntime):
         self._session_contexts[key] = live_context
         self._queues[key] = asyncio.Queue()
         self._receive_tasks[key] = asyncio.create_task(
-            self._receive_loop(key, live_session, session.scenario)
+            self._receive_loop(key, live_session)
         )
+
+        log.info("[RUNTIME] Gemini Live session opened | user=%s", key)
         return live_session
 
     async def _receive_loop(
         self,
         key: str,
         live_session: object,
-        scenario: ScenarioName,
     ) -> None:
+        """Read responses from Gemini Live and parse JSON classifications."""
         queue = self._queues[key]
+        text_buffer = ""
+
         async for message in live_session.receive():
             text = getattr(message, "text", None)
             if not text:
                 continue
 
-            await queue.put(
-                TranscriptFrame(
-                    text=text,
-                    confidence=0.9,
-                    is_final=True,
-                    scenario=scenario,
+            text_buffer += text
+            log.debug("[RUNTIME] Gemini Live raw text chunk | user=%s | text=%r", key, text)
+
+            # Try to parse complete JSON objects from the buffer
+            frames = _extract_json_frames(text_buffer)
+            for frame, consumed in frames:
+                text_buffer = text_buffer[consumed:]
+                log.info(
+                    "[RUNTIME] << Gemini Live classified | category=%s | confidence=%.2f | transcript=%r",
+                    frame.category,
+                    frame.confidence,
+                    frame.transcript[:100],
                 )
-            )
+                await queue.put(frame)
 
     async def ingest_audio(
         self,
         session: AudioSession,
         chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
+    ) -> Optional[ClassifiedFrame]:
+        """Send an audio chunk to Gemini Live. Returns a frame if one is ready."""
         decoded = build_audio_decoder(chunk).decode(chunk)
 
         if not self.api_key:
             raise RuntimeError("Missing GEMINI_API_KEY for GeminiLiveRuntime.")
-
-        if decoded.mime_type != "audio/pcm;rate=16000":
-            raise RuntimeError(
-                "Gemini Live runtime expects PCM16 audio. "
-                "Send audio chunks with format=pcm16 and sample_rate_hz=16000, "
-                "or keep browser-webm for demo mode only."
-            )
 
         live_session = await self._ensure_session(session)
         await live_session.send_realtime_input(
@@ -147,17 +131,26 @@ class GeminiLiveRuntime(BaseRealtimeRuntime):
                 mime_type=decoded.mime_type,
             )
         )
+        session.register_chunk()
 
+        if session.chunk_count % 50 == 0:
+            log.debug(
+                "[RUNTIME] Audio chunks sent | user=%s | total=%d",
+                session.user_id,
+                session.chunk_count,
+            )
+
+        # Check if Gemini has produced a classification
         queue = self._queues[session.user_id]
         try:
-            frame = await asyncio.wait_for(queue.get(), timeout=0.15)
-            session.final_text = frame.text
+            frame = await asyncio.wait_for(queue.get(), timeout=0.1)
             return frame
-        except TimeoutError:
+        except (TimeoutError, asyncio.TimeoutError):
             return None
 
     async def close_session(self, session: AudioSession) -> None:
         key = session.live_session_key or session.user_id
+        log.info("[RUNTIME] Closing Gemini Live session | user=%s", key)
 
         task = self._receive_tasks.pop(key, None)
         if task is not None:
@@ -186,8 +179,34 @@ class GeminiLiveRuntime(BaseRealtimeRuntime):
         await self.client.aio.aclose()
 
 
-def build_runtime() -> BaseRealtimeRuntime:
-    if settings.demo_mode:
-        return DemoTranscriptRuntime()
+def _extract_json_frames(text: str) -> list[tuple[ClassifiedFrame, int]]:
+    """
+    Extract JSON objects from text buffer. Returns list of (frame, chars_consumed).
+    Handles Gemini sometimes wrapping JSON in markdown or adding extra text.
+    """
+    results: list[tuple[ClassifiedFrame, int]] = []
 
+    # Find all JSON-like objects in the text
+    for match in re.finditer(r"\{[^{}]*\}", text):
+        try:
+            data = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            continue
+
+        category = data.get("category", "").upper()
+        if category not in ("SIREN", "SPEECH", "AMBIENT"):
+            continue
+
+        frame = ClassifiedFrame(
+            category=category,
+            transcript=data.get("transcript", ""),
+            confidence=float(data.get("confidence", 0.5)),
+            raw_text=match.group(0),
+        )
+        results.append((frame, match.end()))
+
+    return results
+
+
+def build_runtime() -> GeminiLiveRuntime:
     return GeminiLiveRuntime()
