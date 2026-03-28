@@ -127,80 +127,44 @@ async def dispatch_and_run(
             )
         return
 
-    # ── Route: SPEECH → NameAgent (all speech goes to analysis) ──
+    # ── Route: SPEECH → direct alert (no second AI call) ──
     if category == "SPEECH":
         if not transcript:
             log.info("[DISPATCH] Dropped SPEECH (empty transcript)")
             return
 
-        log.info("[DISPATCH] SPEECH received | transcript=%r", transcript[:100])
+        log.info("[DISPATCH] SPEECH detected | transcript=%r", transcript[:100])
 
         # Debounce
         now = time.time()
         if now - _last_alert.get("name", 0) < DEBOUNCE_SECONDS:
             log.info("[DISPATCH] Debounced speech (within %ds window)", DEBOUNCE_SECONDS)
             return
+        _last_alert["name"] = now
 
-        log.info("[DISPATCH] Routing to NameAgent")
         await send_event({
             "type": "sound_detected",
-            "text": f"Speech: \"{transcript[:80]}\"" if len(transcript) <= 80 else f"Speech: \"{transcript[:77]}...\"",
+            "text": transcript,
             "latency_ms": 0,
         })
         await send_event({
             "type": "agent_update",
             "agent": "dispatch",
             "status": "done",
-            "output": "Speech detected → NameAgent",
+            "output": "Announcement detected",
         })
-        await send_event({
-            "type": "agent_update",
-            "agent": "name",
-            "status": "active",
-            "output": "Analyzing announcement...",
-        })
-
-        try:
-            result = await run_agent(
-                agent_name="name",
-                transcript=transcript,
-                user_name=user_name,
-            )
-        except Exception as exc:
-            log.error("[DISPATCH] NameAgent failed: %s", exc)
-            await send_event({
-                "type": "agent_update",
-                "agent": "name",
-                "status": "done",
-                "output": f"Error: {exc}",
-            })
-            return
-
-        confirmed = result.get("confirmed", False)
         await send_event({
             "type": "agent_update",
             "agent": "name",
             "status": "done",
-            "output": result.get("reason", "Analysis complete"),
+            "output": transcript,
         })
-
-        if confirmed:
-            _last_alert["name"] = now
-            log.info(
-                "[DISPATCH] NameAgent CONFIRMED | title=%r | location=%r",
-                result.get("title"),
-                result.get("location_detail"),
-            )
-            await send_event({
-                "type": "alert",
-                "scenario": "name",
-                "title": result.get("title", "Announcement detected"),
-                "subtitle": result.get("subtitle", "Check the announcement"),
-                "risk": "MEDIUM",
-            })
-        else:
-            log.info(
-                "[DISPATCH] NameAgent REJECTED | reason=%r",
-                result.get("reason"),
-            )
+        await send_event({
+            "type": "alert",
+            "scenario": "name",
+            "title": "Announcement detected",
+            "subtitle": transcript,
+            "risk": "MEDIUM",
+        })
+        log.info("[DISPATCH] SPEECH alert sent | transcript=%r", transcript[:100])
         return

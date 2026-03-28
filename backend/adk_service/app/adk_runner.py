@@ -70,10 +70,9 @@ async def run_agent(
     elif agent_name == "name":
         from agents.myindigo.agent import name_agent as agent
         prompt = (
-            f"Audio monitor detected speech that may contain the user's name.\n"
+            f"Audio monitor detected speech from a microphone.\n"
             f"Transcript: \"{transcript}\"\n"
-            f"User's registered name: \"{user_name}\"\n"
-            f"Determine if the user is being called and respond with JSON."
+            f"Determine if this is a subway, transit, or public announcement and respond with JSON."
         )
     else:
         raise ValueError(f"Unknown agent: {agent_name}")
