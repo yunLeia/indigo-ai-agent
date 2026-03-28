@@ -20,3 +20,10 @@ name_agent = LlmAgent(
     description="Confirms if speech is a subway or transit announcement a deaf user needs.",
     instruction=NAME_AGENT_PROMPT,
 )
+
+summary_agent = LlmAgent(
+    name="summary_agent",
+    model=MODEL,
+    description="Summarizes and categorizes all detected speech with icons and actionable information for deaf users.",
+    instruction=NAME_AGENT_PROMPT,
+)

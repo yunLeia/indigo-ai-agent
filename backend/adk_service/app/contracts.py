@@ -37,10 +37,14 @@ class AgentUpdateEvent(TypedDict):
 
 class AlertEvent(TypedDict):
     type: Literal["alert"]
-    scenario: Literal["siren", "name"]
+    scenario: Literal["siren", "name", "speech"]
     title: str
     subtitle: str
     risk: str
+    icon: Optional[str]
+    action: Optional[str]
+    location: Optional[str]
+    category: Optional[str]
 
 
 ServerEvent = Union[SoundDetectedEvent, AgentUpdateEvent, AlertEvent]

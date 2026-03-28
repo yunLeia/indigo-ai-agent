@@ -1,7 +1,10 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import type { AgentPipelineResult, LiveIngestRequest } from "@/types/live-agent";
+import type {
+  AgentPipelineResult,
+  LiveIngestRequest,
+} from "@/types/live-agent";
 
 // Messages FROM backend
 export type ServerMessage =
@@ -14,10 +17,14 @@ export type ServerMessage =
     }
   | {
       type: "alert";
-      scenario: "siren" | "name";
+      scenario: "siren" | "name" | "speech";
       title: string;
       subtitle: string;
       risk: string;
+      icon?: string;
+      action?: string;
+      location?: string;
+      category?: string;
     };
 
 type UseAgentWebSocketOptions = {
@@ -55,7 +62,8 @@ function getScenarioConfig(
   }
 
   return {
-    transcript: "I can hear a siren and a fire truck is approaching from behind.",
+    transcript:
+      "I can hear a siren and a fire truck is approaching from behind.",
     rawContext: {
       scenarioHint: "emergency_vehicle",
       city: "New York City",
@@ -197,60 +205,66 @@ export function useAgentWebSocket({
     }
   }, []);
 
-  const runPipeline = useCallback(async (forceRun?: boolean) => {
-    if ((!connected && !forceRun) || inFlightRef.current) {
-      return;
-    }
-
-    inFlightRef.current = true;
-
-    try {
-      const scenarioConfig = getScenarioConfig(scenario, userName);
-      const response = await fetch("/api/live/ingest", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          listenInput: {
-            transcript: scenarioConfig.transcript,
-            source: "microphone",
-            confidenceHint: scenario === "siren" ? 0.96 : 0.91,
-          },
-          rawContext: scenarioConfig.rawContext,
-        } satisfies LiveIngestRequest),
-      });
-
-      const payload = (await response.json()) as
-        | { ok: true; result: AgentPipelineResult }
-        | { ok: false; error: string };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(
-          "error" in payload ? payload.error : "Live ingest request failed.",
-        );
+  const runPipeline = useCallback(
+    async (forceRun?: boolean) => {
+      if ((!connected && !forceRun) || inFlightRef.current) {
+        return;
       }
 
-      const messages = toServerMessages(payload.result, scenario);
+      inFlightRef.current = true;
 
-      messageTimeoutsRef.current.forEach(clearTimeout);
-      messageTimeoutsRef.current = messages.map((message, index) =>
-        setTimeout(() => {
-          onMessageRef.current(message);
-        }, 500 + index * 450),
-      );
-    } catch {
-      onMessageRef.current({
-        type: "alert",
-        scenario: scenario === "hospital" ? "name" : "siren",
-        title: "Pipeline unavailable",
-        subtitle: "Check local API routes and try again",
-        risk: "LOW",
-      });
-    } finally {
-      inFlightRef.current = false;
-    }
-  }, [connected, scenario, userName]);
+      try {
+        const scenarioConfig = getScenarioConfig(scenario, userName);
+        const response = await fetch("/api/live/ingest", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            listenInput: {
+              transcript: scenarioConfig.transcript,
+              source: "microphone",
+              confidenceHint: scenario === "siren" ? 0.96 : 0.91,
+            },
+            rawContext: scenarioConfig.rawContext,
+          } satisfies LiveIngestRequest),
+        });
+
+        const payload = (await response.json()) as
+          | { ok: true; result: AgentPipelineResult }
+          | { ok: false; error: string };
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(
+            "error" in payload ? payload.error : "Live ingest request failed.",
+          );
+        }
+
+        const messages = toServerMessages(payload.result, scenario);
+
+        messageTimeoutsRef.current.forEach(clearTimeout);
+        messageTimeoutsRef.current = messages.map((message, index) =>
+          setTimeout(
+            () => {
+              onMessageRef.current(message);
+            },
+            500 + index * 450,
+          ),
+        );
+      } catch {
+        onMessageRef.current({
+          type: "alert",
+          scenario: scenario === "hospital" ? "name" : "siren",
+          title: "Pipeline unavailable",
+          subtitle: "Check local API routes and try again",
+          risk: "LOW",
+        });
+      } finally {
+        inFlightRef.current = false;
+      }
+    },
+    [connected, scenario, userName],
+  );
 
   const sendAudioChunk = useCallback((base64: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {

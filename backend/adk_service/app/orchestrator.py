@@ -128,7 +128,7 @@ async def dispatch_and_run(
             )
         return
 
-    # ── Route: SPEECH → check for subway keywords → SubwayAnnouncementAgent ──
+    # ── Route: SPEECH → Process ALL speech with SummaryAgent ──
     if category == "SPEECH":
         if not transcript:
             log.info("[DISPATCH] Dropped SPEECH (empty transcript)")
@@ -136,33 +136,17 @@ async def dispatch_and_run(
 
         log.info("[DISPATCH] SPEECH detected | transcript=%r", transcript[:100])
 
-        # Check if it sounds like a subway/transit announcement
-        lower = transcript.lower()
-        _SUBWAY_KEYWORDS = [
-            "train", "subway", "platform", "doors", "stop", "station",
-            "arriving", "boarding", "passengers", "stand clear",
-            "next stop", "closing", "track", "line", "express", "local",
-            "delayed", "service", "transfer", "terminal", "attention",
-        ]
-        matched = [kw for kw in _SUBWAY_KEYWORDS if kw in lower]
-
-        if not matched:
-            log.info("[DISPATCH] Dropped SPEECH (no subway keywords) | transcript=%r", transcript[:80])
-            return
-
-        log.info("[DISPATCH] Subway keywords matched: %s", matched)
-
         # Debounce
         now = time.time()
-        if now - _last_alert.get("name", 0) < DEBOUNCE_SECONDS:
-            log.info("[DISPATCH] Debounced announcement (within %ds window)", DEBOUNCE_SECONDS)
+        if now - _last_alert.get("speech", 0) < DEBOUNCE_SECONDS:
+            log.info("[DISPATCH] Debounced speech (within %ds window)", DEBOUNCE_SECONDS)
             return
-        _last_alert["name"] = now
+        _last_alert["speech"] = now
 
         # Stage 1: sound detected
         await send_event({
             "type": "sound_detected",
-            "text": f"Speech detected — subway announcement",
+            "text": f"Speech detected",
             "latency_ms": 0,
         })
 
@@ -171,34 +155,52 @@ async def dispatch_and_run(
             "type": "agent_update",
             "agent": "dispatch",
             "status": "done",
-            "output": f"Transit announcement detected (confidence: {confidence:.0%}) → SubwayAnnouncementAgent",
+            "output": f"Speech detected (confidence: {confidence:.0%}) → SpeechSummaryAgent",
         })
 
         # Stage 3: specialist analyzing
         await send_event({
             "type": "agent_update",
-            "agent": "name",
+            "agent": "summary",
             "status": "active",
-            "output": "Analyzing subway announcement...",
+            "output": "Analyzing speech...",
         })
 
-        await asyncio.sleep(0.6)
+        try:
+            result = await run_agent(
+                agent_name="summary",
+                transcript=transcript,
+                user_name=user_name,
+            )
+        except Exception as exc:
+            log.error("[DISPATCH] SummaryAgent failed: %s", exc)
+            await send_event({
+                "type": "agent_update",
+                "agent": "summary",
+                "status": "done",
+                "output": f"Error analyzing speech: {exc}",
+            })
+            return
 
-        # Stage 4: specialist done — show real transcript
+        # Stage 4: specialist done
         await send_event({
             "type": "agent_update",
-            "agent": "name",
+            "agent": "summary",
             "status": "done",
-            "output": f"Confirmed transit announcement: \"{transcript}\"",
+            "output": result.get("summary", "Speech analyzed"),
         })
 
-        # Stage 5: alert
+        # Stage 5: Send alert with icon and summary
         await send_event({
             "type": "alert",
-            "scenario": "name",
-            "title": "Subway Announcement",
-            "subtitle": transcript,
-            "risk": "MEDIUM",
+            "scenario": "speech",
+            "icon": result.get("icon", "📋"),
+            "title": result.get("title", "Announcement"),
+            "subtitle": result.get("summary", transcript),
+            "action": result.get("action"),
+            "location": result.get("location"),
+            "category": result.get("category", "routine_speech"),
+            "risk": "LOW",
         })
-        log.info("[DISPATCH] Subway announcement alert sent | transcript=%r", transcript[:100])
+        log.info("[DISPATCH] Speech summary alert sent | category=%s", result.get("category"))
         return

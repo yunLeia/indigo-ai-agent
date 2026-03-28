@@ -54,31 +54,32 @@ If confirmed is false, set risk to "LOW" and explain why in reason.
 
 
 NAME_AGENT_PROMPT = """
-You are AnnouncementAgent for myIndigo, an accessibility app for deaf/hard-of-hearing users.
+You are SpeechSummaryAgent for myIndigo, an accessibility app for deaf/hard-of-hearing users.
 
-You receive a speech transcript from a microphone.
-Your job: determine if this is a subway, transit, or public announcement that a deaf user needs to know about.
+You receive a speech transcript detected from the audio.
+Your job: Classify the type of speech and provide a clear, actionable summary for the deaf user.
 
-CONFIRM if it is:
-- Subway/train announcement: "next stop Canal Street", "stand clear of the closing doors"
-- Transit delay or alert: "the 4 train is delayed", "service change on the A line"
-- Public safety announcement in a station or building
-- PA system announcement directed at passengers or visitors
+CLASSIFY the speech into ONE category and respond with a helpful summary:
+1. TRANSIT - Subway/train/bus announcements ("next stop", "stand clear", "doors closing")
+2. PUBLIC_PA - Public announcement (airport, station, hospital PA system)
+3. EMERGENCY_ALERT - Safety/warning announcement
+4. ROUTINE_SPEECH - Regular conversation/other speech
 
-REJECT if it is:
-- Casual conversation between people
-- Music, podcast, or TV audio
-- Someone just talking on their phone
-- Random speech not directed at the public
+For each category, explain:
+- WHAT the announcement says (clear plain language)
+- WHERE it's happening (if mentioned)
+- WHAT ACTION the user should take (if any)
+- ICON to display (🚇 for subway, 📢 for PA, ⚠️  for emergency, 📋 for routine)
 
 Respond with ONLY a JSON object:
 {
-  "confirmed": true or false,
-  "announcement_type": "subway" | "transit_alert" | "pa_announcement" | "not_announcement",
-  "title": "short alert title (max 5 words)",
-  "subtitle": "what the announcement said, in plain language",
-  "station": "station name if mentioned, or null",
-  "action_required": "what the user should do, or null",
-  "reason": "brief explanation of your decision"
+  "category": "transit" | "public_pa" | "emergency_alert" | "routine_speech",
+  "icon": "🚇" | "📢" | "⚠️" | "📋",
+  "title": "short title (max 5 words)",
+  "summary": "what this means in plain language",
+  "location": "where this is happening (or null)",
+  "action": "what the user should do (or null)",
+  "confidence": 0.0 to 1.0,
+  "raw_transcript": "original words spoken"
 }
 """.strip()

@@ -38,23 +38,48 @@ export default function PhoneMockup({
           <div
             style={{
               ...styles.phoneAlert,
-              background: isSiren
-                ? "rgba(226,75,74,0.12)"
-                : "rgba(127,119,221,0.12)",
-              borderTop: isSiren
-                ? "0.5px solid rgba(226,75,74,0.3)"
-                : "0.5px solid rgba(127,119,221,0.3)",
+              background:
+                alert.scenario === "siren"
+                  ? "rgba(226,75,74,0.12)"
+                  : alert.scenario === "speech"
+                    ? "rgba(100,200,255,0.12)"
+                    : "rgba(127,119,221,0.12)",
+              borderTop:
+                alert.scenario === "siren"
+                  ? "0.5px solid rgba(226,75,74,0.3)"
+                  : alert.scenario === "speech"
+                    ? "0.5px solid rgba(100,200,255,0.3)"
+                    : "0.5px solid rgba(127,119,221,0.3)",
             }}
           >
+            <div style={styles.alertIconContainer}>
+              <span style={styles.alertIcon}>{alert.icon || "🔔"}</span>
+            </div>
             <div
               style={{
                 ...styles.phoneAlertTitle,
-                color: isSiren ? "#ff6b6b" : "#CECBF6",
+                color:
+                  alert.scenario === "siren"
+                    ? "#ff6b6b"
+                    : alert.scenario === "speech"
+                      ? "#64c8ff"
+                      : "#CECBF6",
               }}
             >
               {alert.title}
             </div>
             <div style={styles.phoneAlertSub}>{alert.subtitle}</div>
+            {alert.location && (
+              <div style={styles.phoneAlertDetail}>📍 {alert.location}</div>
+            )}
+            {alert.action && (
+              <div style={styles.phoneAlertAction}>➜ {alert.action}</div>
+            )}
+            {alert.category && (
+              <div style={styles.phoneAlertCategory}>
+                {alert.category.replace(/_/g, " ").toUpperCase()}
+              </div>
+            )}
           </div>
         )}
         <div style={styles.phoneBottom}>
@@ -161,6 +186,14 @@ const styles: Record<string, React.CSSProperties> = {
   phoneAlert: {
     padding: "14px 16px",
   },
+  alertIconContainer: {
+    fontSize: 24,
+    marginBottom: 8,
+    display: "block",
+  },
+  alertIcon: {
+    fontSize: 24,
+  },
   phoneAlertTitle: {
     fontSize: 14,
     fontWeight: 600,
@@ -169,6 +202,25 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: "#888",
     marginTop: 3,
+  },
+  phoneAlertDetail: {
+    fontSize: 10,
+    color: "#666",
+    marginTop: 6,
+    paddingTop: 6,
+    borderTop: "0.5px solid rgba(255,255,255,0.1)",
+  },
+  phoneAlertAction: {
+    fontSize: 10,
+    color: "#aaa",
+    marginTop: 4,
+  },
+  phoneAlertCategory: {
+    fontSize: 9,
+    color: "#555",
+    marginTop: 6,
+    textTransform: "uppercase",
+    letterSpacing: "0.5px",
   },
   phoneBottom: {
     background: "#111",

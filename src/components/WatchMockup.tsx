@@ -8,6 +8,7 @@ type WatchMockupProps = {
 
 export default function WatchMockup({ alert }: WatchMockupProps) {
   const isSiren = alert?.scenario === "siren";
+  const isSpeech = alert?.scenario === "speech";
 
   return (
     <div style={styles.frame}>
@@ -21,10 +22,15 @@ export default function WatchMockup({ alert }: WatchMockupProps) {
                   background: "#1a0808",
                   borderColor: "rgba(226,75,74,0.3)",
                 }
-              : {
-                  background: "#110f1f",
-                  borderColor: "rgba(127,119,221,0.3)",
-                }
+              : isSpeech
+                ? {
+                    background: "#081a2a",
+                    borderColor: "rgba(100,200,255,0.3)",
+                  }
+                : {
+                    background: "#110f1f",
+                    borderColor: "rgba(127,119,221,0.3)",
+                  }
             : {}),
         }}
       >
@@ -33,13 +39,22 @@ export default function WatchMockup({ alert }: WatchMockupProps) {
             <div
               style={{
                 ...styles.watchIcon,
-                background: isSiren ? "#E24B4A" : "#7F77DD",
+                background: isSiren
+                  ? "#E24B4A"
+                  : isSpeech
+                    ? "#64c8ff"
+                    : "#7F77DD",
               }}
             >
-              {isSiren ? "!" : "+"}
+              {alert.icon ? alert.icon[0] : isSiren ? "!" : "+"}
             </div>
             <div style={styles.watchTitle}>{alert.title}</div>
-            <div style={styles.watchSub}>{alert.subtitle}</div>
+            <div style={styles.watchSub}>{alert.subtitle.substring(0, 50)}</div>
+            {alert.action && (
+              <div style={styles.watchAction}>
+                ➜ {alert.action.substring(0, 30)}
+              </div>
+            )}
           </div>
         ) : (
           <div style={styles.watchEmpty}>Waiting...</div>
@@ -120,5 +135,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: "#777",
     lineHeight: 1.3,
+  },
+  watchAction: {
+    fontSize: 9,
+    color: "#666",
+    marginTop: 4,
+    paddingTop: 4,
+    borderTop: "0.5px solid rgba(255,255,255,0.1)",
+    width: "100%",
   },
 };

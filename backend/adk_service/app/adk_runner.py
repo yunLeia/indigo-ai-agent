@@ -74,6 +74,14 @@ async def run_agent(
             f"Transcript: \"{transcript}\"\n"
             f"Determine if this is a subway, transit, or public announcement and respond with JSON."
         )
+    elif agent_name == "summary":
+        from agents.myindigo.agent import summary_agent as agent
+        prompt = (
+            f"Audio monitor detected speech.\n"
+            f"Transcript: \"{transcript}\"\n"
+            f"User context: deaf/hard-of-hearing user in NYC.\n"
+            f"Summarize this speech, categorize it, pick an icon, and explain what action to take. Respond with JSON."
+        )
     else:
         raise ValueError(f"Unknown agent: {agent_name}")
 

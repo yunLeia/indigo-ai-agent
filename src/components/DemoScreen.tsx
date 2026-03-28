@@ -12,9 +12,13 @@ import {
 import type { AgentStep } from "./AgentPanel";
 
 export type AlertEvent = {
-  scenario: "siren" | "hospital";
+  scenario: "siren" | "hospital" | "speech";
+  icon?: string;
   title: string;
   subtitle: string;
+  action?: string;
+  location?: string;
+  category?: string;
   risk: string;
 };
 
@@ -168,18 +172,29 @@ export default function DemoScreen({
         return next;
       });
 
-      const scenario = msg.scenario === "name" ? "hospital" : "siren";
+      let scenario: "siren" | "hospital" | "speech" = "siren";
+      if (msg.scenario === "name") scenario = "hospital";
+      else if (msg.scenario === "speech") scenario = "speech";
 
       // Update scenario and location based on what was detected
-      setSc(scenario);
+      setSc(scenario === "speech" ? "siren" : scenario);
       setLocationText(
-        scenario === "siren" ? "Chelsea, NY 10011" : "NYC Subway — Platform",
+        msg.location ||
+          (scenario === "siren"
+            ? "Chelsea, NY 10011"
+            : scenario === "hospital"
+              ? "NYC Subway — Platform"
+              : "Current Location"),
       );
 
       setAlert({
         scenario,
+        icon: msg.icon,
         title: msg.title,
         subtitle: msg.subtitle,
+        action: msg.action,
+        location: msg.location,
+        category: msg.category,
         risk: msg.risk,
       });
     }
