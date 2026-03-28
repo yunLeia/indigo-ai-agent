@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any, Optional
@@ -127,7 +128,7 @@ async def dispatch_and_run(
             )
         return
 
-    # ── Route: SPEECH → direct alert (no second AI call) ──
+    # ── Route: SPEECH → check for subway keywords → SubwayAnnouncementAgent ──
     if category == "SPEECH":
         if not transcript:
             log.info("[DISPATCH] Dropped SPEECH (empty transcript)")
@@ -135,36 +136,69 @@ async def dispatch_and_run(
 
         log.info("[DISPATCH] SPEECH detected | transcript=%r", transcript[:100])
 
+        # Check if it sounds like a subway/transit announcement
+        lower = transcript.lower()
+        _SUBWAY_KEYWORDS = [
+            "train", "subway", "platform", "doors", "stop", "station",
+            "arriving", "boarding", "passengers", "stand clear",
+            "next stop", "closing", "track", "line", "express", "local",
+            "delayed", "service", "transfer", "terminal", "attention",
+        ]
+        matched = [kw for kw in _SUBWAY_KEYWORDS if kw in lower]
+
+        if not matched:
+            log.info("[DISPATCH] Dropped SPEECH (no subway keywords) | transcript=%r", transcript[:80])
+            return
+
+        log.info("[DISPATCH] Subway keywords matched: %s", matched)
+
         # Debounce
         now = time.time()
         if now - _last_alert.get("name", 0) < DEBOUNCE_SECONDS:
-            log.info("[DISPATCH] Debounced speech (within %ds window)", DEBOUNCE_SECONDS)
+            log.info("[DISPATCH] Debounced announcement (within %ds window)", DEBOUNCE_SECONDS)
             return
         _last_alert["name"] = now
 
+        # Stage 1: sound detected
         await send_event({
             "type": "sound_detected",
-            "text": transcript,
+            "text": f"Speech detected — subway announcement",
             "latency_ms": 0,
         })
+
+        # Stage 2: dispatch classifies and routes
         await send_event({
             "type": "agent_update",
             "agent": "dispatch",
             "status": "done",
-            "output": "Announcement detected",
+            "output": f"Transit announcement detected (confidence: {confidence:.0%}) → SubwayAnnouncementAgent",
         })
+
+        # Stage 3: specialist analyzing
+        await send_event({
+            "type": "agent_update",
+            "agent": "name",
+            "status": "active",
+            "output": "Analyzing subway announcement...",
+        })
+
+        await asyncio.sleep(0.6)
+
+        # Stage 4: specialist done — show real transcript
         await send_event({
             "type": "agent_update",
             "agent": "name",
             "status": "done",
-            "output": transcript,
+            "output": f"Confirmed transit announcement: \"{transcript}\"",
         })
+
+        # Stage 5: alert
         await send_event({
             "type": "alert",
             "scenario": "name",
-            "title": "Announcement detected",
+            "title": "Subway Announcement",
             "subtitle": transcript,
             "risk": "MEDIUM",
         })
-        log.info("[DISPATCH] SPEECH alert sent | transcript=%r", transcript[:100])
+        log.info("[DISPATCH] Subway announcement alert sent | transcript=%r", transcript[:100])
         return
