@@ -42,24 +42,13 @@ class ServiceSettings:
                 self.adk_gemini_api_key_source = source
                 break
 
-        self.next_pipeline_url = os.getenv(
-            "NEXT_PIPELINE_URL",
-            "http://localhost:3000/api/live/ingest",
+        self.classify_model = os.getenv(
+            "CLASSIFY_MODEL", "gemini-2.5-flash"
         )
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-        self.adk_agent_model = os.getenv("ADK_AGENT_MODEL", self.gemini_model)
-        # ADK infers the app name from its installed package layout in our current
-        # local setup, so we keep this configurable instead of hardcoding it.
-        self.adk_app_name = os.getenv("ADK_APP_NAME", "agents")
-        self.demo_mode = os.getenv("ADK_SERVICE_DEMO_MODE", "true").lower() == "true"
-        self.orchestration_mode = os.getenv(
-            "ADK_ORCHESTRATION_MODE",
-            "bridge",
-        )
-        self.audio_input_mode = os.getenv(
-            "ADK_AUDIO_INPUT_MODE",
-            "browser-webm",
+        self.adk_agent_model = os.getenv("ADK_AGENT_MODEL", "gemini-2.5-flash")
+        self.adk_app_name = os.getenv("ADK_APP_NAME", "myindigo")
+        self.confidence_threshold = float(
+            os.getenv("CONFIDENCE_THRESHOLD", "0.5")
         )
 
 

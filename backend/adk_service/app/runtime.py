@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import logging
+import struct
+import time
+import wave
 from dataclasses import dataclass
 from typing import Optional
 
@@ -9,185 +14,274 @@ from google.genai import types
 
 from app.audio_codec import build_audio_decoder
 from app.config import settings
-from app.contracts import AudioChunkMessage, ScenarioName
+from app.contracts import AudioCategory, AudioChunkMessage
+from app.prompts import CLASSIFY_PROMPT
 from app.session import AudioSession
+
+log = logging.getLogger("myindigo.runtime")
+
+# Classify every N seconds of accumulated audio
+CLASSIFY_INTERVAL = 5.0
+SAMPLE_RATE = 16000
 
 
 @dataclass
-class TranscriptFrame:
-    text: str
+class ClassifiedFrame:
+    """Output from Gemini: a classified audio event."""
+
+    category: AudioCategory
+    transcript: str
     confidence: float
-    is_final: bool
-    scenario: ScenarioName
+    raw_text: str
 
 
-class BaseRealtimeRuntime:
-    async def ingest_audio(
-        self,
-        session: AudioSession,
-        _chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
-        raise NotImplementedError
-
-    async def close_session(self, _session: AudioSession) -> None:
-        return None
-
-    async def shutdown(self) -> None:
-        return None
-
-
-class DemoTranscriptRuntime(BaseRealtimeRuntime):
-    DEMO_TRANSCRIPTS = {
-        "siren": "I can hear a siren and a fire truck is approaching from behind.",
-        "hospital": "Alex Kim, please proceed to Exam Room 3 now.",
-    }
-
-    async def ingest_audio(
-        self,
-        session: AudioSession,
-        chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
-        build_audio_decoder(chunk).decode(chunk)
-        session.register_chunk()
-        if not session.ready_for_demo_final:
-            return None
-
-        session.final_text = self.DEMO_TRANSCRIPTS[session.scenario]
-        return TranscriptFrame(
-            text=session.final_text,
-            confidence=0.96 if session.scenario == "siren" else 0.91,
-            is_final=True,
-            scenario=session.scenario,
-        )
-
-
-class GeminiLiveRuntime(BaseRealtimeRuntime):
+class GeminiClassifyRuntime:
     """
-    Placeholder runtime for the real Gemini Live streaming path.
+    Accumulates PCM16 audio from the browser, then every few seconds
+    sends the audio blob to Gemini generate_content() for classification.
 
-    Planned implementation:
-    - decode browser audio chunks into the format expected by Gemini Live
-    - maintain a persistent session per websocket client
-    - emit partial frames and final transcript frames
-    - optionally route transcript text to ADK specialist agents
+    This is more reliable than Gemini Live for non-speech sounds (sirens)
+    because we control exactly when to classify and craft a specific prompt.
     """
 
     def __init__(self) -> None:
         self.api_key = settings.adk_gemini_api_key
-        self.model = settings.gemini_model
+        self.model = settings.classify_model
         self.client = genai.Client(api_key=self.api_key)
-        self._sessions: dict[str, object] = {}
-        self._session_contexts: dict[str, object] = {}
-        self._receive_tasks: dict[str, asyncio.Task[None]] = {}
-        self._queues: dict[str, asyncio.Queue[TranscriptFrame]] = {}
+        self._buffers: dict[str, bytearray] = {}
+        self._last_classify: dict[str, float] = {}
+        self._classify_lock: dict[str, asyncio.Lock] = {}
+        self._backoff_until: float = 0.0
 
-    async def _ensure_session(self, session: AudioSession) -> object:
-        key = session.user_id
-        if key in self._sessions:
-            return self._sessions[key]
-
-        live_context = self.client.aio.live.connect(
-            model=self.model,
-            config={
-                "response_modalities": ["TEXT"],
-            },
+        log.info(
+            "[RUNTIME] GeminiClassifyRuntime initialized | model=%s | interval=%.1fs",
+            self.model,
+            CLASSIFY_INTERVAL,
         )
-        live_session = await live_context.__aenter__()
-        session.live_session_key = key
-        self._sessions[key] = live_session
-        self._session_contexts[key] = live_context
-        self._queues[key] = asyncio.Queue()
-        self._receive_tasks[key] = asyncio.create_task(
-            self._receive_loop(key, live_session, session.scenario)
-        )
-        return live_session
-
-    async def _receive_loop(
-        self,
-        key: str,
-        live_session: object,
-        scenario: ScenarioName,
-    ) -> None:
-        queue = self._queues[key]
-        async for message in live_session.receive():
-            text = getattr(message, "text", None)
-            if not text:
-                continue
-
-            await queue.put(
-                TranscriptFrame(
-                    text=text,
-                    confidence=0.9,
-                    is_final=True,
-                    scenario=scenario,
-                )
-            )
 
     async def ingest_audio(
         self,
         session: AudioSession,
         chunk: AudioChunkMessage,
-    ) -> Optional[TranscriptFrame]:
+    ) -> Optional[ClassifiedFrame]:
+        """Buffer audio chunk. Every CLASSIFY_INTERVAL, classify the buffer."""
         decoded = build_audio_decoder(chunk).decode(chunk)
 
         if not self.api_key:
-            raise RuntimeError("Missing GEMINI_API_KEY for GeminiLiveRuntime.")
+            raise RuntimeError("Missing GEMINI_API_KEY.")
 
-        if decoded.mime_type != "audio/pcm;rate=16000":
-            raise RuntimeError(
-                "Gemini Live runtime expects PCM16 audio. "
-                "Send audio chunks with format=pcm16 and sample_rate_hz=16000, "
-                "or keep browser-webm for demo mode only."
-            )
+        key = session.user_id
+        if key not in self._buffers:
+            self._buffers[key] = bytearray()
+            self._last_classify[key] = time.time()
+            self._classify_lock[key] = asyncio.Lock()
 
-        live_session = await self._ensure_session(session)
-        await live_session.send_realtime_input(
-            media=types.Blob(
-                data=decoded.raw_bytes,
-                mime_type=decoded.mime_type,
-            )
-        )
+        self._buffers[key].extend(decoded.raw_bytes)
+        session.register_chunk()
 
-        queue = self._queues[session.user_id]
-        try:
-            frame = await asyncio.wait_for(queue.get(), timeout=0.15)
-            session.final_text = frame.text
-            return frame
-        except TimeoutError:
+        # Check if it's time to classify
+        now = time.time()
+        elapsed = now - self._last_classify[key]
+        if elapsed < CLASSIFY_INTERVAL:
             return None
 
+        # Don't run two classifies at once
+        lock = self._classify_lock[key]
+        if lock.locked():
+            return None
+
+        async with lock:
+            # Take the buffer
+            pcm_bytes = bytes(self._buffers[key])
+            self._buffers[key].clear()
+            self._last_classify[key] = now
+
+            if len(pcm_bytes) < 3200:  # Less than 100ms of audio
+                log.debug("[RUNTIME] Buffer too small, skipping classify")
+                return None
+
+            # Check RMS energy - skip silent audio
+            rms = _pcm_rms(pcm_bytes)
+            if rms < 300:
+                log.debug("[RUNTIME] Quiet audio (RMS=%.0f), skipping classify", rms)
+                return None
+
+            log.info(
+                "[RUNTIME] Classifying %.1fs of audio (RMS=%.0f) | user=%s",
+                len(pcm_bytes) / (SAMPLE_RATE * 2),
+                rms,
+                key,
+            )
+
+            # Wrap PCM in WAV for Gemini
+            wav_bytes = _pcm_to_wav(pcm_bytes)
+
+            # Call Gemini
+            return await self._classify(session, wav_bytes)
+
+    async def _classify(
+        self,
+        session: AudioSession,
+        wav_bytes: bytes,
+    ) -> Optional[ClassifiedFrame]:
+        """Send audio to Gemini and parse the classification response."""
+        # Rate limit backoff
+        if self._backoff_until > time.time():
+            wait = int(self._backoff_until - time.time())
+            log.warning("[RUNTIME] Rate limited, waiting %ds", wait)
+            return None
+
+        start = time.time()
+
+        prompt = CLASSIFY_PROMPT.format(user_name=session.user_name)
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part(
+                                inline_data=types.Blob(
+                                    data=wav_bytes,
+                                    mime_type="audio/wav",
+                                )
+                            ),
+                            types.Part(text=prompt),
+                        ],
+                    )
+                ],
+            )
+        except Exception as exc:
+            err = str(exc)
+            if "429" in err or "RESOURCE_EXHAUSTED" in err:
+                self._backoff_until = time.time() + 30
+                log.warning("[RUNTIME] Rate limited — backing off 30s")
+            else:
+                log.error("[RUNTIME] Gemini API call failed: %s", exc)
+            return None
+
+        elapsed_ms = int((time.time() - start) * 1000)
+        raw_text = (response.text or "").strip()
+
+        log.info(
+            "[RUNTIME] Gemini responded in %dms | raw=%r",
+            elapsed_ms,
+            raw_text[:200],
+        )
+
+        if not raw_text:
+            return None
+
+        return _parse_response(raw_text)
+
     async def close_session(self, session: AudioSession) -> None:
-        key = session.live_session_key or session.user_id
-
-        task = self._receive_tasks.pop(key, None)
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-
-        live_session = self._sessions.pop(key, None)
-        if live_session is not None:
-            await live_session.close()
-
-        live_context = self._session_contexts.pop(key, None)
-        if live_context is not None:
-            await live_context.__aexit__(None, None, None)
-
-        self._queues.pop(key, None)
+        key = session.user_id
+        self._buffers.pop(key, None)
+        self._last_classify.pop(key, None)
+        self._classify_lock.pop(key, None)
+        log.info("[RUNTIME] Session cleaned up | user=%s", key)
 
     async def shutdown(self) -> None:
-        keys = list(self._sessions.keys())
-        for key in keys:
-            await self.close_session(
-                AudioSession(user_name=key, user_id=key, live_session_key=key)
+        self._buffers.clear()
+        self._last_classify.clear()
+
+
+def _pcm_rms(pcm_bytes: bytes) -> float:
+    """Compute RMS energy of PCM16 audio."""
+    n_samples = len(pcm_bytes) // 2
+    if n_samples == 0:
+        return 0.0
+    samples = struct.unpack(f"<{n_samples}h", pcm_bytes[: n_samples * 2])
+    sq_sum = sum(s * s for s in samples)
+    return (sq_sum / n_samples) ** 0.5
+
+
+def _pcm_to_wav(pcm_bytes: bytes) -> bytes:
+    """Wrap raw PCM16 bytes in a WAV header."""
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(SAMPLE_RATE)
+        wf.writeframes(pcm_bytes)
+    return buf.getvalue()
+
+
+# ── Ignore list: responses that mean "nothing interesting" ──
+_IGNORE_PHRASES = [
+    "ambient", "silence", "nothing", "quiet", "no sound",
+    "background noise", "i can't hear", "i don't hear",
+    "i didn't hear", "no significant",
+]
+
+
+def _parse_response(text: str) -> Optional[ClassifiedFrame]:
+    """
+    Parse Gemini's text response into a ClassifiedFrame.
+    Expected format: "SIREN: description" or "SPEECH: transcription" or "AMBIENT"
+    Falls back to keyword detection.
+    """
+    lower = text.lower().strip()
+
+    # Skip non-actionable responses
+    for phrase in _IGNORE_PHRASES:
+        if phrase in lower and "siren" not in lower and "emergency" not in lower:
+            log.info("[RUNTIME] Dropped (ambient/silence): %r", text[:100])
+            return None
+
+    upper = text.upper().strip()
+
+    # Check for keyword prefix
+    if "SIREN" in upper[:20]:
+        transcript = text.split(":", 1)[1].strip() if ":" in text else text
+        return ClassifiedFrame(
+            category="SIREN",
+            transcript=transcript,
+            confidence=0.85,
+            raw_text=text,
+        )
+
+    if "SPEECH" in upper[:20]:
+        transcript = text.split(":", 1)[1].strip() if ":" in text else text
+        return ClassifiedFrame(
+            category="SPEECH",
+            transcript=transcript,
+            confidence=0.85,
+            raw_text=text,
+        )
+
+    if "AMBIENT" in upper[:20]:
+        log.info("[RUNTIME] Classified as AMBIENT: %r", text[:100])
+        return None
+
+    # Fallback: siren-related keywords
+    siren_keywords = [
+        "siren", "ambulance", "fire truck", "fire engine", "police",
+        "emergency vehicle", "alarm", "fire alarm", "emergency",
+        "wailing", "horn",
+    ]
+    for kw in siren_keywords:
+        if kw in lower:
+            return ClassifiedFrame(
+                category="SIREN",
+                transcript=text,
+                confidence=0.7,
+                raw_text=text,
             )
-        await self.client.aio.aclose()
+
+    # Fallback: if it contains substantial text, treat as speech
+    if len(text.strip()) > 15:
+        return ClassifiedFrame(
+            category="SPEECH",
+            transcript=text,
+            confidence=0.6,
+            raw_text=text,
+        )
+
+    return None
 
 
-def build_runtime() -> BaseRealtimeRuntime:
-    if settings.demo_mode:
-        return DemoTranscriptRuntime()
-
-    return GeminiLiveRuntime()
+def build_runtime() -> GeminiClassifyRuntime:
+    return GeminiClassifyRuntime()

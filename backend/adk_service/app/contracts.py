@@ -5,30 +5,21 @@ from typing import Literal, Optional, TypedDict, Union
 from pydantic import BaseModel
 
 
-ScenarioName = Literal["siren", "hospital"]
-OrchestrationMode = Literal["bridge", "adk"]
+AudioCategory = Literal["SIREN", "SPEECH", "AMBIENT"]
 
 
 class InitMessage(BaseModel):
+    model_config = {"extra": "ignore"}
     type: Literal["init"]
     user_name: str
     user_id: str
-    scenario: Optional[ScenarioName] = None
 
 
 class AudioChunkMessage(BaseModel):
     type: Literal["audio_chunk"]
     data: str
-    format: Literal["browser-webm", "pcm16"] = "browser-webm"
+    format: Literal["browser-webm", "pcm16"] = "pcm16"
     sample_rate_hz: Optional[int] = None
-
-
-class DebugOrchestrateRequest(BaseModel):
-    transcript: str
-    scenario: ScenarioName
-    user_name: str = "Alex Kim"
-    confidence: float = 0.9
-    mode: Optional[OrchestrationMode] = None
 
 
 class SoundDetectedEvent(TypedDict):
