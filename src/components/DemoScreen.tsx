@@ -76,7 +76,7 @@ type DemoScreenProps = {
   onLogout: () => void;
 };
 
-const WS_URL = "ws://localhost:3000/api/live/ingest";
+const WS_URL = "ws://127.0.0.1:8001/ws";
 
 export default function DemoScreen({
   userName,
