@@ -7,6 +7,10 @@ Real-time audio awareness for deaf and hard-of-hearing users. Your phone listens
 [Pitch Deck](https://www.figma.com/deck/ebsg6XMvEQVfHLcYQmva4Z/myIndigo_Google?node-id=1-133&viewport=-124%2C-31%2C0.59&t=TTdyLd0Ns68gQfd3-1&scaling=min-zoom&content-scaling=fixed&page-id=0%3A1) · [Demo Video](https://drive.google.com/file/d/1Ic5Nt25LI1L3mll7LpblyA9hC5c_LEzM/view?usp=sharing)
 
 
+https://github.com/user-attachments/assets/df79313f-8f92-4237-9333-d928fc11e2a3
+
+
+
 ## The Problem
 
 Existing tools either transcribe everything (Ava, Live Transcribe) or detect sound categories (iPhone Sound Recognition). Neither tells you *what to do*. "Siren detected" doesn't help when you're crossing the street and a fire truck is behind you.
